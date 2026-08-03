@@ -18,6 +18,7 @@ dist/            构建产物：sender-server（Mac 二进制）、sender-server
 data/            服务端生产数据库（messages.db，备份 = 拷贝这个文件）
 design/          Web UI 设计稿（三个方向初稿 + 已选定的 Terminal 方向）
 tasks/           各阶段任务书（发给 agent 的 /goal 文档）
+AGENTS.md        Agent 规则：下次会话的入口（定位/运行/约定/下一步）
 ```
 
 ## 快速开始

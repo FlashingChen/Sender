@@ -5,3 +5,4 @@
 - 阻塞原因：`Overview.AppShare` 来自 store.go 的 `AppShareRow`（仅 App/Count/Pct 三字段），SQL 只 SELECT `m.app, COUNT(*)`，模板层拿不到 app_name。修复必须改 store.go（AppShareRow 加 AppName 字段 + SELECT 加 m.app_name + scan）和/或 web.go，超出白名单（其余只读）且违反「本修复不改 Go 逻辑，若发现必须改逻辑才能修，写 BLOCKED.md 停下」。
 - 可选裁决：① 允许动 store.go 一行级改动（加字段+SELECT/scan），模板侧随即补一行完成；② 接受 App 占比保持包名原文（该列表为 flex 两列、无宽度挤压、无重叠 bug，仅显示一致性差异）。
 - 已做：tail -5 与历史页均已改 AppName+title，仅 App 占比一项待裁决。
+- 裁决进展（2026-08-03）：领导已批复走方案①（允许动 store.go），执行任务书 `tasks/fix-appshare-label.md` 已就绪、尚未执行；执行时按任务书在本条追加裁决记录。
