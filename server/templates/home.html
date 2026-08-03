@@ -1,0 +1,21 @@
+{{define "home.html"}}
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title>{{template "terminal-style" .}}<style>.line{cursor:pointer}</style></head>
+<body>{{if .HasUser}}{{template "terminal-nav" .}}{{end}}
+<main class="wrap">
+{{if .HasUser}}
+<h1>概览</h1><div class="sub">{{.Overview.Day}} · {{.Overview.Devices}} 台设备在线 · {{if .Overview.Uplink}}上行正常{{else}}上行离线{{end}}</div>
+<div class="kpis"><div class="kpi"><div class="k">TODAY</div><div class="v">{{.Overview.Today}}</div></div><div class="kpi"><div class="k">WEEK</div><div class="v">{{.Overview.Week}}</div></div><div class="kpi"><div class="k">AGENTS</div><div class="v">{{.Overview.Agents}}</div></div><div class="kpi"><div class="k">UPLINK</div><div class="v">{{if .Overview.Uplink}}<b>OK</b>{{else}}<b style="color:var(--red)">OFFLINE</b>{{end}}</div></div></div>
+<div class="log"><div class="head"><span>7 日趋势</span><span>COUNT GROUP BY day</span></div><div class="bars">{{range .Overview.Trend}}<span style="height:{{.Pct}}%" title="{{.Day}} {{.Count}}"></span>{{end}}</div><div class="days">{{range .Overview.Trend}}<span>{{.Day}}</span>{{end}}</div></div>
+<div class="log"><div class="head"><span>最新消息 · tail -5</span><span>server-side</span></div>{{if .Overview.Tail}}{{range .Overview.Tail}}<div class="line"><span class="t">{{.Time}}</span><span class="src" title="{{.App}}">{{.AppName}}</span><span class="m"><span class="who">{{.Sender}}</span>{{.Content}}</span></div>{{end}}{{else}}<div class="empty">暂无消息</div>{{end}}</div>
+<div class="log"><div class="head"><span>App 占比</span><span>SQL aggregate</span></div>{{if .Overview.AppShare}}<div class="apps">{{range .Overview.AppShare}}<div class="app-share"><span>{{.App}}</span><b>{{.Count}} · {{.Pct}}%</b></div>{{end}}</div>{{else}}<div class="empty">暂无应用数据</div>{{end}}</div>
+{{else}}
+{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+{{end}}
+</main><script>
+// 点击行展开/收起完整消息：行内已含全文，仅切换 class，CSS 控制显示
+document.querySelectorAll(".line").forEach(function (el) {
+  el.addEventListener("click", function () { el.classList.toggle("expanded"); });
+});
+</script></body></html>
+{{end}}

@@ -1,0 +1,14 @@
+{{define "history.html"}}
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title>{{template "terminal-style" .}}<style>.line{cursor:pointer}</style></head>
+<body>{{template "terminal-nav" .}}<main class="wrap">
+<h1>历史</h1><div class="sub">全部消息 · grep 式搜索 · 每页 50 条</div>
+<form class="filters" method="get" action="/history"><span class="prompt">$</span><input type="date" name="day" value="{{.History.Day}}"><select name="app"><option value="">app=*</option>{{range .History.AppOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>app={{.Label}}</option>{{end}}</select><select name="device_id"><option value="">dev=*</option>{{range .History.DeviceOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>dev={{.Label}}</option>{{end}}</select><input type="text" name="q" value="{{.History.Search}}" placeholder="grep 内容、sender、chat…"><button class="ok" type="submit">查询</button></form>
+<div class="log"><div class="head"><span>{{.History.Total}} 条匹配 · 第 {{.History.Page}}/{{.History.Pages}} 页</span><span>FTS5 / OFFSET</span></div>{{if .History.Messages}}{{range .History.Messages}}<div class="line"><span class="t">{{.Time}}</span><span class="src" title="{{.App}}">{{.AppName}}</span><span class="m"><span class="who">{{.Sender}}</span>{{.Content}}</span></div>{{end}}{{else}}<div class="empty">没有匹配消息</div>{{end}}<div class="pager">{{if .History.HasPrevious}}<a href="{{.History.PreviousURL}}">上一页</a>{{else}}<span>上一页</span>{{end}}<span>{{.History.Page}} / {{.History.Pages}}</span>{{if .History.HasNext}}<a href="{{.History.NextURL}}">下一页</a>{{else}}<span>下一页</span>{{end}}</div></div>
+</main><script>
+// 点击行展开/收起完整消息：行内已含全文，仅切换 class，CSS 控制显示
+document.querySelectorAll(".line").forEach(function (el) {
+  el.addEventListener("click", function () { el.classList.toggle("expanded"); });
+});
+</script></body></html>
+{{end}}

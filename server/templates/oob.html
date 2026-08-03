@@ -1,0 +1,5 @@
+{{define "oob.html"}}
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title>{{template "standalone-style" .}}</head>
+<body><main class="standalone"><section class="sbox"><div class="sbrand">SENDER · <b>授权结果</b></div>{{if .OOBCode}}<h1>授权成功</h1><div class="muted">把下面的一次性 code 复制回贴给 agent：</div><div class="oobcode">{{.OOBCode}}</div><div class="aka">5 分钟内有效 · 仅可使用一次 · 请勿泄露</div>{{else}}<h1>授权未完成</h1><div class="error">{{.Error}}</div>{{end}}</section></main></body></html>
+{{end}}

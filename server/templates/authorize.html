@@ -1,0 +1,7 @@
+{{define "authorize.html"}}
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title>{{template "standalone-style" .}}</head>
+<body><main class="standalone"><section class="sbox"><div class="sbrand">SENDER · <b>OAuth 授权</b></div><h1>授权请求</h1>{{if .Error}}<div class="error">{{.Error}}</div>{{end}}{{if .Authorization.Ready}}
+<div class="sudo"><div class="who">{{.Authorization.ClientID}}</div><div class="ask">请求 <span class="scope">读取全部历史消息 <span class="tag">必选</span></span><br>回调：{{.Authorization.RedirectURI}}<br>登录账号：<span class="who">{{.User.Username}}</span></div><form method="post" action="/authorize"><input type="hidden" name="response_type" value="{{.Authorization.ResponseType}}"><input type="hidden" name="client_id" value="{{.Authorization.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.Authorization.RedirectURI}}"><input type="hidden" name="code_challenge" value="{{.Authorization.CodeChallenge}}"><input type="hidden" name="code_challenge_method" value="{{.Authorization.CodeChallengeMethod}}"><input type="hidden" name="state" value="{{.Authorization.State}}"><div class="row"><button class="ok" name="action" value="approve" type="submit">批准 (y)</button><button class="danger" name="action" value="deny" type="submit">拒绝 (n)</button></div></form></div><div class="aka">授权码 5 分钟内有效 · 仅可使用一次 · 本页由授权链接打开</div>
+{{else}}<div class="aka"><a href="/login">前往登录</a></div>{{end}}</section></main></body></html>
+{{end}}

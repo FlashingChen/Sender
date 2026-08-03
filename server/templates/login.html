@@ -1,0 +1,6 @@
+{{define "login.html"}}
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title>{{template "standalone-style" .}}</head>
+<body><main class="standalone"><section class="sbox"><div class="sbrand">SENDER · <b>登录</b></div><h1>登录</h1>{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+<form method="post" action="/login"><input type="hidden" name="next" value="{{.Next}}"><label for="username">username</label><input id="username" name="username" value="{{.Username}}" autocomplete="username" required><label for="password">password</label><input id="password" name="password" type="password" autocomplete="current-password" required><div class="row"><button class="ok" type="submit">登录</button></div></form><div class="aka">还没有账号？<a href="/register">注册</a></div></section></main></body></html>
+{{end}}

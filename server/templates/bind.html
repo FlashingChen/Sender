@@ -1,0 +1,10 @@
+{{define "bind.html"}}
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title>{{template "terminal-style" .}}</head>
+<body>{{template "terminal-nav" .}}<main class="wrap">
+<h1>绑定设备</h1><div class="sub">手动绑定：输入手机设置页显示的设备 ID 与密钥</div>
+{{if .Message}}<div class="notice">{{.Message}}</div>{{end}}{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+<form class="filters" method="post" action="/bind"><span class="prompt">$</span><input type="text" name="device_id" value="{{.DeviceID}}" placeholder="device_id" required><input type="password" name="secret" placeholder="secret" autocomplete="off" required><button class="ok" type="submit">绑定</button></form>
+<div class="log"><div class="head"><span>已绑定设备</span><span>{{len .Devices}} 台</span></div>{{if .Devices}}{{range .Devices}}<div class="line"><span class="t">{{.BoundAt}}</span><span class="src">{{.DeviceID}}</span><span class="m"><span class="who">{{.Name}}</span>上行状态已纳入统计</span></div>{{end}}{{else}}<div class="empty">暂无已绑定设备</div>{{end}}</div>
+</main></body></html>
+{{end}}

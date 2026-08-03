@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sender · Terminal（方向 2/3 · 修正版）</title>
+<style>
+:root{--bg:#0A0B08;--panel:#101208;--line:#232614;--text:#E8E4D8;--dim:#9A947F;--faint:#5C574A;--amber:#E8A33D;--green:#7FB069;--red:#C05B4D}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:13.5px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,"PingFang SC",monospace;text-wrap:pretty}
+.top{display:flex;align-items:center;gap:22px;padding:14px 22px;border-bottom:1px solid var(--line)}
+.brand{color:var(--amber);font-weight:700;letter-spacing:.05em}
+.brand::before{content:"$ "}
+.tabs{display:flex;gap:2px}
+.tab{padding:6px 14px;color:var(--dim);cursor:pointer;border:1px solid transparent}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--amber);border-color:var(--line);border-radius:4px;background:var(--panel)}
+.top .right{margin-left:auto;color:var(--faint)}
+.wrap{max-width:1080px;margin:26px auto;padding:0 22px}
+.page{display:none}
+.page.active{display:block}
+h1{font-size:15px;font-weight:700;color:var(--amber);margin-bottom:6px}
+h1::before{content:"# "}
+.sub{color:var(--dim);margin-bottom:20px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:22px}
+.kpi{border:1px solid var(--line);border-radius:4px;padding:12px 14px;background:var(--panel)}
+.kpi .k{color:var(--faint);font-size:11px;letter-spacing:.08em}
+.kpi .v{font-size:22px;color:var(--text);margin-top:4px;font-variant-numeric:tabular-nums}
+.kpi .v b{color:var(--green);font-weight:600}
+.bars{display:flex;gap:6px;align-items:flex-end;height:70px;margin:14px 0 4px}
+.bars span{flex:1;background:var(--amber);opacity:.75;min-height:3px}
+.bars span.cur{opacity:1}
+.days{display:flex;gap:6px;color:var(--faint);font-size:11px}
+.days span{flex:1;text-align:center}
+.log{border:1px solid var(--line);border-radius:4px;background:var(--panel);margin-bottom:22px}
+.log .head{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);color:var(--faint);font-size:11px;letter-spacing:.08em}
+.line{display:grid;grid-template-columns:150px 110px 1fr;gap:14px;padding:7px 14px;border-bottom:1px solid var(--line);align-items:baseline}
+.line:last-child{border-bottom:none}
+.line:hover{background:var(--panel)}
+.line .t{color:var(--faint)}
+.line .src{color:var(--dim)}
+.line .src::before{content:"[";color:var(--faint)}.line .src::after{content:"]";color:var(--faint)}
+.line .m{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.line .m .who{color:var(--amber)}
+.line .m .who::after{content:": ";color:var(--faint)}
+.filters{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.filters input,.filters select{background:var(--panel);border:1px solid var(--line);color:var(--text);padding:7px 10px;font:inherit;font-size:12.5px;border-radius:4px}
+.filters input:focus,.filters select:focus{outline:none;border-color:var(--amber)}
+.filters .prompt{color:var(--amber);align-self:center;font-size:12px}
+.filters input[type=text]{flex:1;min-width:200px}
+.pager{display:flex;justify-content:flex-end;gap:14px;padding:10px 14px;color:var(--faint);font-size:12px}
+.pager a{color:var(--dim);cursor:pointer;text-decoration:none}
+.pager a:hover{color:var(--amber)}
+button{font:inherit;border-radius:4px;padding:9px 16px;cursor:pointer;border:1px solid var(--line);background:var(--bg);color:var(--text)}
+button.ok{background:var(--amber);border-color:var(--amber);color:#1A1204;font-weight:700}
+button.danger{color:var(--red);border-color:#3A2420}
+/* —— 独立页（无站点导航，仅链接直达）：登录 / 注册 / 授权同意 / OOB 码 —— */
+.standalone{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.sbox{width:100%;max-width:480px;border:1px solid var(--line);border-radius:4px;background:var(--panel);padding:28px}
+.sbox h1{margin-bottom:14px}
+.sbox label{display:block;color:var(--faint);font-size:12px;margin:12px 0 4px}
+.sbox input{width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);padding:9px 11px;font:inherit;border-radius:4px}
+.sbox input:focus{outline:none;border-color:var(--amber)}
+.sbox .row{display:flex;gap:10px;margin-top:20px}
+.sbox .row button{flex:1}
+.sbox .aka{color:var(--faint);font-size:11px;margin-top:16px;text-align:center}
+.sudo{border:1px solid var(--line);border-left:3px solid var(--amber);border-radius:4px;background:var(--panel);padding:20px 22px;margin-bottom:16px}
+.sudo .who{color:var(--amber);font-weight:700}
+.sudo .ask{color:var(--dim);margin:10px 0 16px;line-height:1.9}
+.sudo .scope{color:var(--text);background:var(--bg);border:1px solid var(--line);padding:8px 12px;border-radius:4px;margin:10px 0}
+.sudo .scope .tag{color:var(--green)}
+.sbrand{text-align:center;color:var(--faint);font-size:12px;margin-bottom:18px;letter-spacing:.08em}
+.sbrand b{color:var(--amber)}
+.oobcode{border:1px solid var(--line);border-left:3px solid var(--green);border-radius:4px;background:var(--bg);padding:16px 20px;margin:14px 0;font-size:20px;letter-spacing:.1em;text-align:center;color:var(--green);word-break:break-all}
+</style>
+</head>
+<body>
+
+<!-- ======== 应用内页面（带站点导航） ======== -->
+<div id="app">
+<div class="top">
+  <div class="brand">sender</div>
+  <div class="tabs">
+    <div class="tab active" data-p="overview">概览</div>
+    <div class="tab" data-p="history">历史</div>
+    <div class="tab" data-p="bind">绑定设备</div>
+  </div>
+  <div class="right">alice@localhost:8080</div>
+</div>
+<div class="wrap">
+
+  <section class="page active" id="overview">
+    <h1>概览</h1>
+    <div class="sub">2026-08-03 · 1 台设备在线 · 示例数据</div>
+    <div class="kpis">
+      <div class="kpi"><div class="k">TODAY</div><div class="v">42</div></div>
+      <div class="kpi"><div class="k">WEEK</div><div class="v">318</div></div>
+      <div class="kpi"><div class="k">AGENTS</div><div class="v">2</div></div>
+      <div class="kpi"><div class="k">UPLINK</div><div class="v"><b>OK</b></div></div>
+    </div>
+    <div class="log">
+      <div class="head"><span>7 日趋势</span><span>08-03 峰值 88%</span></div>
+      <div class="bars"><span style="height:30%"></span><span style="height:46%"></span><span style="height:38%"></span><span style="height:62%"></span><span style="height:55%"></span><span style="height:74%"></span><span class="cur" style="height:88%"></span></div>
+      <div class="days"><span>07-28</span><span>07-29</span><span>07-30</span><span>07-31</span><span>08-01</span><span>08-02</span><span>08-03</span></div>
+    </div>
+    <div class="log">
+      <div class="head"><span>最新消息 · tail -5</span><span>示例数据</span></div>
+      <div class="line"><span class="t">14:22:07</span><span class="src">wechat</span><span class="m"><span class="who">老陈爱刷机</span>你好，npm view 那个命令你跑了吗</span></div>
+      <div class="line"><span class="t">14:20:31</span><span class="src">twitter</span><span class="m"><span class="who">Qwen</span>Qwen3.8 即将推出并开源权重，2.4T 参数…</span></div>
+      <div class="line"><span class="t">14:12:03</span><span class="src">wechat</span><span class="m"><span class="who">文件传输助手</span>[图片]</span></div>
+      <div class="line"><span class="t">13:58:44</span><span class="src">system</span><span class="m"><span class="who">系统</span>电池已优化 · 通知权限正常</span></div>
+      <div class="line"><span class="t">13:41:09</span><span class="src">wechat</span><span class="m"><span class="who">老陈爱刷机</span>晚上一起吃饭？</span></div>
+    </div>
+  </section>
+
+  <section class="page" id="history">
+    <h1>历史</h1>
+    <div class="sub">全部消息 · grep 式搜索 · 示例数据</div>
+    <div class="filters">
+      <span class="prompt">$</span>
+      <input type="date" value="2026-08-03">
+      <select><option>app=*</option><option>app=wechat</option><option>app=twitter</option><option>app=system</option></select>
+      <select><option>dev=*</option><option>dev=M2012K11AC</option></select>
+      <input type="text" placeholder="grep 内容…">
+      <button class="ok">查询</button>
+    </div>
+    <div class="log">
+      <div class="head"><span>42 条匹配 · 第 1/7 页</span><span>耗时 12ms</span></div>
+      <div class="line"><span class="t">14:22:07</span><span class="src">wechat</span><span class="m"><span class="who">老陈爱刷机</span>你好，npm view 那个命令你跑了吗</span></div>
+      <div class="line"><span class="t">14:20:31</span><span class="src">twitter</span><span class="m"><span class="who">Qwen</span>Qwen3.8 即将推出并开源权重，2.4T 参数…</span></div>
+      <div class="line"><span class="t">14:12:03</span><span class="src">wechat</span><span class="m"><span class="who">文件传输助手</span>[图片]</span></div>
+      <div class="line"><span class="t">13:58:44</span><span class="src">system</span><span class="m"><span class="who">系统</span>电池已优化 · 通知权限正常</span></div>
+      <div class="line"><span class="t">13:41:09</span><span class="src">wechat</span><span class="m"><span class="who">老陈爱刷机</span>晚上一起吃饭？</span></div>
+      <div class="pager"><span>上一页</span><span>1 / 7</span><span>下一页</span></div>
+    </div>
+  </section>
+
+  <section class="page" id="bind">
+    <h1>绑定设备</h1>
+    <div class="sub">手动绑定：输入手机设置页显示的设备 ID 与密钥</div>
+    <div class="filters" style="max-width:560px">
+      <span class="prompt">$</span>
+      <input type="text" placeholder="device_id" style="flex:2;min-width:200px">
+      <input type="text" placeholder="secret" style="flex:1;min-width:140px">
+      <button class="ok">绑定</button>
+    </div>
+    <div class="log">
+      <div class="head"><span>已绑定设备</span><span>1 台</span></div>
+      <div class="line"><span class="t">08-03</span><span class="src">M2012K11AC</span><span class="m"><span class="who">绑定账号</span>alice · 上报正常</span></div>
+    </div>
+  </section>
+
+</div>
+</div>
+
+<!-- ======== 独立页 1：授权同意（仅授权链接直达，无站点导航） ======== -->
+<div class="standalone" id="standalone-consent" style="display:none">
+  <div class="sbox">
+    <div class="sbrand">SENDER · OAuth 授权</div>
+    <div class="sudo">
+      <div class="who">my-agent</div>
+      <div class="ask">请求 <span class="scope" style="display:inline-block;margin:0 4px;padding:1px 8px">读取全部历史消息 <span class="tag">必选</span></span><br>
+      回调：https://agent.example.com/callback<br>
+      登录账号：alice</div>
+      <div class="row" style="display:flex;gap:10px">
+        <button class="ok">批准 (y)</button>
+        <button class="danger">拒绝 (n)</button>
+      </div>
+    </div>
+    <div class="aka">令牌有效期 7 天 · 本页由授权链接打开 · 无站点导航</div>
+  </div>
+</div>
+
+<!-- ======== 独立页 2：OOB 一次性码（agent 无法收回调时的兜底） ======== -->
+<div class="standalone" id="standalone-oob" style="display:none">
+  <div class="sbox">
+    <div class="sbrand">SENDER · 授权成功</div>
+    <div style="color:var(--dim);font-size:13px;margin-bottom:6px">把下面的一次性 code 复制回贴给 agent：</div>
+    <div class="oobcode">4f8a2c9d1e0b7a3f6c5d4e2b8a9f0c31</div>
+    <div class="aka">5 分钟内有效 · 仅可使用一次 · 请勿泄露</div>
+  </div>
+</div>
+
+<!-- ======== 独立页 3：登录（无站点导航） ======== -->
+<div class="standalone" id="standalone-login" style="display:none">
+  <div class="sbox">
+    <div class="sbrand">SENDER · 登录</div>
+    <label>username</label><input value="alice">
+    <label>password</label><input type="password" value="········">
+    <div class="row"><button class="ok">登录</button></div>
+    <div class="aka">还没有账号？<a style="color:var(--amber)" href="#">注册</a></div>
+  </div>
+</div>
+
+<!-- 演示入口（仅原型用，真实站点不存在）： -->
+<div style="position:fixed;bottom:12px;right:16px;display:flex;gap:8px;z-index:9">
+  <button onclick="showStandalone('standalone-consent')">演示：授权同意页（链接直达）</button>
+  <button onclick="showStandalone('standalone-oob')">演示：OOB 码页</button>
+  <button onclick="showStandalone('standalone-login')">演示：登录页</button>
+  <button onclick="location.reload()">返回应用</button>
+</div>
+<script>
+function switchPage(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.p===id));document.querySelectorAll('#app .page').forEach(p=>p.classList.toggle('active',p.id===id))}
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>switchPage(t.dataset.p)))
+function showStandalone(id){document.getElementById('app').style.display='none';document.querySelectorAll('.standalone').forEach(s=>s.style.display='none');document.getElementById(id).style.display='flex'}
+</script>
+</body>
+</html>

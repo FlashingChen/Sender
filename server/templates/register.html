@@ -1,0 +1,6 @@
+{{define "register.html"}}
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title>{{template "standalone-style" .}}</head>
+<body><main class="standalone"><section class="sbox"><div class="sbrand">SENDER · <b>注册</b></div><h1>注册</h1>{{if .Error}}<div class="error">{{.Error}}</div>{{end}}
+<form method="post" action="/register"><label for="username">username</label><input id="username" name="username" value="{{.Username}}" autocomplete="username" required><label for="password">password（至少 8 位）</label><input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required><div class="row"><button class="ok" type="submit">注册</button></div></form><div class="aka">已有账号？<a href="/login">登录</a></div></section></main></body></html>
+{{end}}

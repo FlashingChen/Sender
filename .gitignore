@@ -1,0 +1,23 @@
+# 敏感数据：生产数据库（含真实消息内容与设备密钥），永不入库
+data/
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# 本机构建产物
+dist/
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/captures/
+.kotlin/
+build/
+
+# IDE / 系统
+.idea/
+*.iml
+.vscode/
+.DS_Store

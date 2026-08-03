@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sender · Pulse（方向 3/3）</title>
+<style>
+:root{--bg:#0E1113;--panel:#14191C;--panel2:#1A2126;--border:#222B31;--text:#E4EAED;--dim:#8E9AA3;--faint:#55616B;--teal:#2DD4BF;--blue:#4C9AFF;--wechat:#07C160;--amber:#E8A33D}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;text-wrap:pretty}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.header{display:flex;align-items:center;gap:26px;padding:0 30px;height:58px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg)}
+.brand{font-weight:700;letter-spacing:.02em;display:flex;align-items:center;gap:9px}
+.brand .mark{width:18px;height:18px;border-radius:5px;background:var(--teal);display:grid;place-items:center;font-size:11px;color:#06201C;font-weight:800}
+.nav{display:flex;gap:4px}
+.nav a{padding:7px 14px;border-radius:7px;color:var(--dim);cursor:pointer;font-size:13.5px}
+.nav a:hover{color:var(--text);background:var(--panel2)}
+.nav a.active{color:var(--teal);background:var(--panel2)}
+.header .right{margin-left:auto;display:flex;align-items:center;gap:12px;color:var(--dim);font-size:13px}
+.status-dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+.wrap{max-width:1120px;margin:24px auto;padding:0 30px}
+.page{display:none}
+.page.active{display:block}
+h1{font-size:19px;font-weight:700}
+.sub{color:var(--dim);font-size:13px;margin:4px 0 20px}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.card{border:1px solid var(--border);border-radius:12px;background:var(--panel);padding:16px}
+.card .lbl{font-size:12px;color:var(--dim);display:flex;justify-content:space-between}
+.card .num{font-size:26px;font-weight:700;margin-top:6px}
+.card .num small{font-size:12px;color:var(--faint);font-weight:400;margin-left:6px}
+.card .chg{font-size:11.5px;color:var(--teal);margin-top:4px}
+.split{display:grid;grid-template-columns:1.6fr 1fr;gap:12px;margin-bottom:20px}
+.card h3{font-size:13px;font-weight:600;color:var(--dim);margin-bottom:14px}
+.chart{display:flex;align-items:flex-end;gap:7px;height:96px}
+.chart .col{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}
+.chart .col .bar{background:linear-gradient(180deg,var(--teal),#1E7A6E);border-radius:4px 4px 2px 2px;min-height:4px}
+.chart .col.cur .bar{background:linear-gradient(180deg,#5EEAD4,var(--teal))}
+.chart .col .d{text-align:center;color:var(--faint);font-size:10.5px;margin-top:6px}
+.donut{position:relative;width:130px;height:130px;margin:0 auto 14px;border-radius:50%;background:conic-gradient(var(--wechat) 0 61%,var(--blue) 61% 79%,#8B949E 79% 92%,var(--amber) 92% 100%)}
+.donut::after{content:"";position:absolute;inset:26px;background:var(--panel);border-radius:50%}
+.donut .mid{position:absolute;inset:0;display:grid;place-items:center;text-align:center;z-index:1}
+.donut .mid b{font-size:20px}.donut .mid span{display:block;font-size:10px;color:var(--faint)}
+.legend{display:flex;flex-direction:column;gap:7px;font-size:12.5px;color:var(--dim)}
+.legend .row{display:flex;align-items:center;gap:8px}
+.legend i{width:8px;height:8px;border-radius:2px}
+.legend .pct{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--text)}
+.filters{display:flex;gap:9px;flex-wrap:wrap;margin-bottom:14px}
+input,select,button{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 12px;font-size:13px;font-family:inherit}
+input:focus,select:focus{outline:none;border-color:var(--teal)}
+button.primary{background:var(--teal);border-color:var(--teal);color:#06201C;font-weight:650;cursor:pointer}
+button.ghost{color:var(--dim);cursor:pointer}
+table{width:100%;border-collapse:collapse}
+th{font-size:11.5px;color:var(--faint);font-weight:500;text-align:left;padding:9px 14px;border-bottom:1px solid var(--border);letter-spacing:.04em}
+td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:baseline}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--panel2)}
+.appbadge{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+.appbadge i{width:6px;height:6px;border-radius:50%}
+.msg{max-width:520px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg .who{color:var(--dim);margin-right:7px}
+.pager{display:flex;justify-content:space-between;align-items:center;padding:12px 14px;color:var(--faint);font-size:12px}
+.center{max-width:440px;margin:6vh auto;border:1px solid var(--border);border-radius:14px;background:var(--panel);padding:28px}
+.center h1{font-size:17px;margin-bottom:14px}
+.center label{display:block;font-size:12px;color:var(--dim);margin:13px 0 5px}
+.center input{width:100%}
+.center .row{display:flex;gap:10px;margin-top:18px}
+.center .row button{flex:1;padding:10px}
+.center .foot{margin-top:14px;text-align:center;font-size:12px;color:var(--faint)}
+.reqapp{display:flex;align-items:center;gap:12px;border:1px solid var(--border);border-radius:12px;background:var(--panel2);padding:14px;margin-bottom:16px}
+.reqapp .logo{width:42px;height:42px;border-radius:10px;background:linear-gradient(135deg,#123B33,#1E5A4E);display:grid;place-items:center;font-weight:800;color:var(--teal);font-size:17px}
+.reqapp .nm{font-weight:650}
+.reqapp .uri{font-size:12px;color:var(--faint);font-family:ui-monospace,monospace;margin-top:2px}
+.scopes{border:1px solid var(--border);border-radius:10px;margin-bottom:16px;overflow:hidden}
+.scopes .item{display:flex;justify-content:space-between;padding:11px 14px;border-bottom:1px solid var(--border);font-size:13px}
+.scopes .item:last-child{border-bottom:none}
+.scopes .req{font-size:11px;color:var(--teal);border:1px solid #1F4A42;border-radius:5px;padding:1px 7px}
+.scopes .desc{font-size:12px;color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="brand"><span class="mark">S</span>Sender</div>
+  <div class="nav">
+    <a class="active" data-p="overview">概览</a>
+    <a data-p="history">历史记录</a>
+    <a data-p="consent">授权</a>
+    <a data-p="login">登录</a>
+  </div>
+  <div class="right"><span class="status-dot"></span>alice · 08-03</div>
+</div>
+<div class="wrap">
+
+  <section class="page active" id="overview">
+    <h1>概览</h1>
+    <div class="sub">2026-08-03 · 设备 1 台在线 · 示例数据</div>
+    <div class="grid">
+      <div class="card"><div class="lbl">今日消息</div><div class="num">42<small>+12</small></div><div class="chg">▲ 较昨日 40%</div></div>
+      <div class="card"><div class="lbl">本周合计</div><div class="num">318<small>条</small></div><div class="chg">微信占 61%</div></div>
+      <div class="card"><div class="lbl">已授权 agent</div><div class="num">2<small>个</small></div><div class="chg">均 7 天内活跃</div></div>
+      <div class="card"><div class="lbl">上行链路</div><div class="num" style="color:var(--teal)">正常<small></small></div><div class="chg">最近同步 2 分钟前</div></div>
+    </div>
+    <div class="split">
+      <div class="card">
+        <h3>近 14 日消息量</h3>
+        <div class="chart">
+          <div class="col"><div class="bar" style="height:22%"></div><div class="d">07-21</div></div>
+          <div class="col"><div class="bar" style="height:34%"></div><div class="d">22</div></div>
+          <div class="col"><div class="bar" style="height:28%"></div><div class="d">23</div></div>
+          <div class="col"><div class="bar" style="height:45%"></div><div class="d">24</div></div>
+          <div class="col"><div class="bar" style="height:38%"></div><div class="d">25</div></div>
+          <div class="col"><div class="bar" style="height:52%"></div><div class="d">26</div></div>
+          <div class="col"><div class="bar" style="height:41%"></div><div class="d">27</div></div>
+          <div class="col"><div class="bar" style="height:58%"></div><div class="d">28</div></div>
+          <div class="col"><div class="bar" style="height:64%"></div><div class="d">29</div></div>
+          <div class="col"><div class="bar" style="height:49%"></div><div class="d">30</div></div>
+          <div class="col"><div class="bar" style="height:71%"></div><div class="d">31</div></div>
+          <div class="col"><div class="bar" style="height:66%"></div><div class="d">01</div></div>
+          <div class="col"><div class="bar" style="height:80%"></div><div class="d">02</div></div>
+          <div class="col cur"><div class="bar" style="height:100%"></div><div class="d">03</div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>App 占比</h3>
+        <div class="donut"><div class="mid"><b>318</b><span>本周</span></div></div>
+        <div class="legend">
+          <div class="row"><i style="background:var(--wechat)"></i>微信<span class="pct">61%</span></div>
+          <div class="row"><i style="background:var(--blue)"></i>X<span class="pct">18%</span></div>
+          <div class="row"><i style="background:#8B949E"></i>Android 系统<span class="pct">13%</span></div>
+          <div class="row"><i style="background:var(--amber)"></i>其他<span class="pct">8%</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="padding:0 0 10px">最新消息</h3>
+      <table>
+        <tr><th>时间</th><th>App</th><th>发送者</th><th>内容</th></tr>
+        <tr><td class="mono" style="color:var(--faint)">14:22:07</td><td><span class="appbadge"><i style="background:var(--wechat)"></i>微信</span></td><td>老陈爱刷机</td><td class="msg">你好，npm view 那个命令你跑了吗</td></tr>
+        <tr><td class="mono" style="color:var(--faint)">14:20:31</td><td><span class="appbadge"><i style="background:var(--blue)"></i>X</span></td><td>Qwen</td><td class="msg">Qwen3.8 即将推出并开源权重，2.4T 参数…</td></tr>
+        <tr><td class="mono" style="color:var(--faint)">14:12:03</td><td><span class="appbadge"><i style="background:var(--wechat)"></i>微信</span></td><td>文件传输助手</td><td class="msg">[图片]</td></tr>
+        <tr><td class="mono" style="color:var(--faint)">13:58:44</td><td><span class="appbadge"><i style="background:#8B949E"></i>系统</span></td><td>系统</td><td class="msg">电池已优化 · 通知权限正常</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="page" id="history">
+    <h1>历史记录</h1>
+    <div class="sub">全部消息 · 过滤 · 全文搜索 · 示例数据</div>
+    <div class="filters">
+      <input type="date" value="2026-08-03">
+      <select><option>全部 App</option><option>微信</option><option>X</option><option>Android 系统</option></select>
+      <select><option>全部设备</option><option>M2012K11AC</option></select>
+      <input placeholder="搜索内容…" style="flex:1;min-width:180px">
+      <button class="primary">查询</button>
+    </div>
+    <div class="card">
+      <table>
+        <tr><th>时间</th><th>App</th><th>发送者</th><th>内容</th></tr>
+        <tr><td class="mono" style="color:var(--faint)">14:22:07</td><td><span class="appbadge"><i style="background:var(--wechat)"></i>微信</span></td><td>老陈爱刷机</td><td class="msg">你好，npm view 那个命令你跑了吗</td></tr>
+        <tr><td class="mono" style="color:var(--faint)">14:20:31</td><td><span class="appbadge"><i style="background:var(--blue)"></i>X</span></td><td>Qwen</td><td class="msg">Qwen3.8 即将推出并开源权重，2.4T 参数…</td></tr>
+        <tr><td class="mono" style="color:var(--faint)">14:12:03</td><td><span class="appbadge"><i style="background:var(--wechat)"></i>微信</span></td><td>文件传输助手</td><td class="msg">[图片]</td></tr>
+        <tr><td class="mono" style="color:var(--faint)">13:58:44</td><td><span class="appbadge"><i style="background:#8B949E"></i>系统</span></td><td>系统</td><td class="msg">电池已优化 · 通知权限正常</td></tr>
+        <tr><td class="mono" style="color:var(--faint)">13:41:09</td><td><span class="appbadge"><i style="background:var(--wechat)"></i>微信</span></td><td>老陈爱刷机</td><td class="msg">晚上一起吃饭？</td></tr>
+      </table>
+      <div class="pager"><span>共 42 条</span><span>第 1 / 7 页</span><span><button class="ghost">上一页</button> <button class="ghost">下一页</button></span></div>
+    </div>
+  </section>
+
+  <section class="page" id="consent">
+    <h1>授权</h1>
+    <div class="sub">第三方应用请求访问你的数据</div>
+    <div class="center" style="margin:0">
+      <h1>授权请求</h1>
+      <div class="reqapp"><div class="logo">A</div><div><div class="nm">my-agent</div><div class="uri">client_id: my-agent · 回调 https://agent.example.com/callback</div></div></div>
+      <div style="font-size:13px;color:var(--dim);margin-bottom:12px">登录账号：<b style="color:var(--text)">alice</b></div>
+      <div class="scopes">
+        <div class="item">读取全部历史消息 <span class="req">必选</span><span class="desc">按天查询 · 搜索 · 统计</span></div>
+      </div>
+      <div class="row">
+        <button class="primary">同意并授权</button>
+        <button class="ghost">拒绝</button>
+      </div>
+      <div class="foot">令牌 7 天有效 · 可随时吊销</div>
+    </div>
+  </section>
+
+  <section class="page" id="login">
+    <h1>登录</h1>
+    <div class="sub">账号与授权管理</div>
+    <div class="center" style="margin:0">
+      <h1>登录 Sender</h1>
+      <label>用户名</label><input value="alice">
+      <label>密码</label><input type="password" value="········">
+      <div class="row"><button class="primary">登录</button></div>
+      <div class="foot">还没有账号？<a style="color:var(--teal)" href="#">注册</a></div>
+    </div>
+  </section>
+
+</div>
+<script>
+document.querySelectorAll('.nav a').forEach(t=>t.addEventListener('click',()=>{document.querySelectorAll('.nav a').forEach(x=>x.classList.toggle('active',x===t));document.querySelectorAll('.page').forEach(p=>p.classList.toggle('active',p.id===t.dataset.p))}))
+</script>
+</body>
+</html>
