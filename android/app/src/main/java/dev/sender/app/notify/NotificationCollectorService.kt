@@ -1,6 +1,7 @@
 package dev.sender.app.notify
 
 import android.app.Notification
+import android.content.ComponentName
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import dev.sender.app.SenderApp
@@ -13,6 +14,18 @@ import kotlinx.coroutines.launch
  * the toggle filter and dedup happen before/at insert.
  */
 class NotificationCollectorService : NotificationListenerService() {
+
+    /** One-shot: after the first connect with no active notifications, ask the
+     *  system to rebind so notifications already on screen are re-delivered
+     *  (several OEMs do not replay them otherwise after boot/access grant). */
+    private var rebindRequested = false
+
+    override fun onListenerConnected() {
+        if (!rebindRequested && activeNotifications.isEmpty()) {
+            rebindRequested = true
+            runCatching { requestRebind(ComponentName(this, NotificationCollectorService::class.java)) }
+        }
+    }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         val app = application as SenderApp

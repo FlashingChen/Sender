@@ -73,7 +73,7 @@ class ApiClientTest {
         val factory = FakeFactory()
         val body = """{"messages":[{"client_msg_id":"com.tencent.mm:notif_key:1780000000123"}]}"""
         val ok = client(factory).upload(deviceId, secret, body)
-        assertTrue(ok)
+        assertEquals(UploadResult.SUCCESS, ok)
         val conn = factory.connections.single()
         assertEquals("POST", conn.requestMethod)
         assertEquals("http://10.0.2.2:8080/api/v1/devices/$deviceId/messages", conn.createdUrls.single())
@@ -81,20 +81,23 @@ class ApiClientTest {
         assertEquals(body, conn.output.toString(Charsets.UTF_8.name()))
     }
 
-    /** Contract: only 2xx counts as success. */
+    /** 401/403 means the device registration is gone; everything else is a plain failure. */
     @Test
-    fun non2xxResponse_returnsFalse() = runBlocking {
-        val factory = FakeFactory()
-        factory.status = 500
-        assertFalse(client(factory).upload(deviceId, secret, "{}"))
-        assertEquals(1, factory.connections.size)
+    fun upload_distinguishesAuthFailure() = runBlocking {
+        val unauthorized = FakeFactory().also { it.status = 401 }
+        assertEquals(UploadResult.AUTH_FAILED, client(unauthorized).upload(deviceId, secret, "{}"))
+        val forbidden = FakeFactory().also { it.status = 403 }
+        assertEquals(UploadResult.AUTH_FAILED, client(forbidden).upload(deviceId, secret, "{}"))
+        val serverError = FakeFactory().also { it.status = 500 }
+        assertEquals(UploadResult.FAILED, client(serverError).upload(deviceId, secret, "{}"))
     }
 
     /** Network failure = upload failure; rows stay synced=0 for retry. */
     @Test
-    fun networkError_returnsFalse() = runBlocking {
+    fun networkError_returnsFailure() = runBlocking {
         val factory = FakeFactory()
         factory.failWith = java.io.IOException("connection refused")
+        assertEquals(UploadResult.FAILED, client(factory).upload(deviceId, secret, "{}"))
         assertFalse(client(factory).register(deviceId, secret, "Pixel 8"))
     }
 }

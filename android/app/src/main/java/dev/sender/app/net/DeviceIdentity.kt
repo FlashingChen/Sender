@@ -20,8 +20,18 @@ class DeviceIdentity(context: Context) {
     }
 
     val secret: String by lazy {
-        prefs.getString(KEY_SECRET, null) ?: randomHex32().also {
-            prefs.edit().putString(KEY_SECRET, it).apply()
+        val stored = prefs.getString(KEY_SECRET, null)
+        if (stored == null) {
+            val fresh = randomHex32()
+            prefs.edit().putString(KEY_SECRET, SecretCipher.encrypt(fresh)).apply()
+            fresh
+        } else {
+            val plain = SecretCipher.decryptOrPassThrough(stored)
+            // Migrate a legacy plaintext value to ciphertext on first read.
+            if (SecretCipher.isLegacyPlaintext(stored)) {
+                prefs.edit().putString(KEY_SECRET, SecretCipher.encrypt(plain)).apply()
+            }
+            plain
         }
     }
 

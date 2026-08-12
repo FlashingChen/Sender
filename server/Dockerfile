@@ -16,7 +16,8 @@ COPY --from=build /out/sender-server /usr/local/bin/sender-server
 
 ENV ADDR=:8080 \
     DB_PATH=/data/messages.db \
-    TZ=Asia/Shanghai
+    TZ=Asia/Shanghai \
+    ALLOW_REGISTRATION=false
 EXPOSE 8080
 VOLUME ["/data"]
 USER sender

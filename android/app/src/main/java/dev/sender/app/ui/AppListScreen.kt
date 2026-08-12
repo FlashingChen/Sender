@@ -25,20 +25,29 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import dev.sender.app.SenderApp
 import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** Screen 1: per-app list — icon, name, today's count, capture switch. Data all from local DB. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,7 +59,18 @@ fun AppListScreen(
     val context = LocalContext.current
     val app = context.applicationContext as SenderApp
     val scope = rememberCoroutineScope()
-    val today = LocalDate.now().toString()
+    var today by remember { mutableStateOf(LocalDate.now().toString()) }
+    // Refresh the "today" bucket when the app resumes (e.g. across midnight).
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                today = LocalDate.now().toString()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val summaries by app.database.capturedDao().appSummaries(today).collectAsState(initial = emptyList())
     val pm = context.packageManager
 
@@ -112,7 +132,13 @@ fun AppListScreen(
 }
 
 @Composable
-private fun rememberAppIcon(pm: android.content.pm.PackageManager, packageName: String): ImageBitmap? =
-    remember(packageName) {
-        runCatching { pm.getApplicationIcon(packageName).toBitmap().asImageBitmap() }.getOrNull()
+private fun rememberAppIcon(pm: android.content.pm.PackageManager, packageName: String): ImageBitmap? {
+    val icon = produceState<ImageBitmap?>(initialValue = null, packageName) {
+        value = withContext(Dispatchers.IO) {
+            runCatching {
+                pm.getApplicationIcon(packageName).toBitmap(width = 80, height = 80).asImageBitmap()
+            }.getOrNull()
+        }
     }
+    return icon.value
+}

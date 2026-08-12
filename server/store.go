@@ -72,6 +72,8 @@ var (
 	ErrAuthorizationPKCE     = errors.New("authorization PKCE verification failed")
 	ErrDeviceNotFound        = errors.New("device not found")
 	ErrDeviceSecretInvalid   = errors.New("device secret is invalid")
+	ErrDeviceExists          = errors.New("device already registered with a different secret")
+	ErrDeviceAlreadyBound    = errors.New("device already bound to another account")
 )
 
 const (
@@ -119,7 +121,23 @@ func OpenStore(path string, loc *time.Location) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := store.purgeExpired(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return store, nil
+}
+
+// purgeExpired deletes expired sessions, access tokens, and authorization
+// codes so the tables do not grow without bound.
+func (s *Store) purgeExpired() error {
+	now := time.Now().UTC().Unix()
+	for _, table := range []string{"sessions", "tokens", "oauth_codes"} {
+		if _, err := s.db.Exec(`DELETE FROM `+table+` WHERE expires_at < ?`, now); err != nil {
+			return fmt.Errorf("purge expired %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) migrate() error {
@@ -263,17 +281,33 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// RegisterDevice creates or replaces a device's name and secret.
+// RegisterDevice creates a device or, for a re-registration with the same
+// secret, refreshes its display name. The secret of an existing device is
+// never rotated through this unauthenticated endpoint; a conflicting
+// registration fails with ErrDeviceExists.
 func (s *Store) RegisterDevice(deviceID, name, secret string) error {
-	_, err := s.db.Exec(`
+	var stored string
+	err := s.db.QueryRow(`SELECT secret FROM devices WHERE device_id = ?`, deviceID).Scan(&stored)
+	switch {
+	case err == nil:
+		if subtle.ConstantTimeCompare([]byte(stored), []byte(secret)) != 1 {
+			return ErrDeviceExists
+		}
+		if _, err := s.db.Exec(`UPDATE devices SET name = ? WHERE device_id = ?`, name, deviceID); err != nil {
+			return fmt.Errorf("update device name: %w", err)
+		}
+		return nil
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := s.db.Exec(`
 INSERT INTO devices(device_id, name, secret, created_at)
 VALUES (?, ?, ?, ?)
-ON CONFLICT(device_id) DO UPDATE SET name = excluded.name, secret = excluded.secret
-`, deviceID, name, secret, time.Now().UTC().Unix())
-	if err != nil {
-		return fmt.Errorf("register device: %w", err)
+`, deviceID, name, secret, time.Now().UTC().Unix()); err != nil {
+			return fmt.Errorf("register device: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("read device for registration: %w", err)
 	}
-	return nil
 }
 
 // AuthenticateDevice reports whether secret is the current secret for deviceID.
@@ -409,6 +443,10 @@ func (s *Store) IssueAccessToken(userID int64, ttl time.Duration) (string, error
 }
 
 func (s *Store) issueCredential(table string, userID int64, ttl time.Duration, byteLength int) (string, error) {
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`DELETE FROM `+table+` WHERE expires_at < ?`, now.Unix()); err != nil {
+		return "", fmt.Errorf("purge expired %s: %w", table, err)
+	}
 	for attempt := 0; attempt < 5; attempt++ {
 		raw, err := randomHex(byteLength)
 		if err != nil {
@@ -418,7 +456,7 @@ func (s *Store) issueCredential(table string, userID int64, ttl time.Duration, b
 			"INSERT INTO "+table+"(token_hash, user_id, expires_at) VALUES (?, ?, ?)",
 			hashCredential(raw),
 			userID,
-			time.Now().UTC().Add(ttl).Unix(),
+			now.Add(ttl).Unix(),
 		)
 		if err == nil {
 			return raw, nil
@@ -453,6 +491,10 @@ WHERE token_hash = ? AND expires_at > ?
 // CreateAuthorizationCode issues a single-use authorization code, storing
 // only its SHA-256 hash along with the bindings it was issued for.
 func (s *Store) CreateAuthorizationCode(clientID string, userID int64, redirectURI, codeChallenge string, ttl time.Duration) (string, error) {
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`DELETE FROM oauth_codes WHERE expires_at < ?`, now.Unix()); err != nil {
+		return "", fmt.Errorf("purge expired authorization codes: %w", err)
+	}
 	for attempt := 0; attempt < 5; attempt++ {
 		raw, err := randomHex(authorizationCodeByteLength)
 		if err != nil {
@@ -461,7 +503,7 @@ func (s *Store) CreateAuthorizationCode(clientID string, userID int64, redirectU
 		_, err = s.db.Exec(`
 INSERT INTO oauth_codes(code_hash, client_id, user_id, redirect_uri, code_challenge, expires_at)
 VALUES (?, ?, ?, ?, ?, ?)
-`, hashCredential(raw), clientID, userID, redirectURI, codeChallenge, time.Now().UTC().Add(ttl).Unix())
+`, hashCredential(raw), clientID, userID, redirectURI, codeChallenge, now.Add(ttl).Unix())
 		if err == nil {
 			return raw, nil
 		}
@@ -548,15 +590,20 @@ func verifyPKCE(codeVerifier, codeChallenge string) bool {
 	return subtle.ConstantTimeCompare([]byte(challenge), []byte(codeChallenge)) == 1
 }
 
-// BindDevice proves possession of a device secret and assigns the device to a user.
+// BindDevice proves possession of a device secret and assigns the device to a
+// user. Rebinding a device already owned by another account fails with
+// ErrDeviceAlreadyBound; re-binding to the same account is idempotent.
 func (s *Store) BindDevice(deviceID, secret string, userID int64) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin device binding: %w", err)
 	}
 	defer tx.Rollback()
-	var stored string
-	err = tx.QueryRow(`SELECT secret FROM devices WHERE device_id = ?`, deviceID).Scan(&stored)
+	var (
+		stored         string
+		existingUserID sql.NullInt64
+	)
+	err = tx.QueryRow(`SELECT secret, user_id FROM devices WHERE device_id = ?`, deviceID).Scan(&stored, &existingUserID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrDeviceNotFound
 	}
@@ -565,6 +612,9 @@ func (s *Store) BindDevice(deviceID, secret string, userID int64) error {
 	}
 	if subtle.ConstantTimeCompare([]byte(stored), []byte(secret)) != 1 {
 		return ErrDeviceSecretInvalid
+	}
+	if existingUserID.Valid && existingUserID.Int64 != userID {
+		return ErrDeviceAlreadyBound
 	}
 	if _, err := tx.Exec(`
 UPDATE devices
@@ -744,13 +794,9 @@ func (s *Store) QueryMessages(query messageQuery) ([]MessageRecord, string, erro
 	}
 
 	// With no day filter, the contract asks for the most recent window. It is
-	// returned in the same ascending order as day-scoped queries.
+	// returned in the same ascending order as day-scoped queries. Cursors are
+	// only valid for day-scoped traversal (enforced in parseMessageQuery).
 	if query.Day == "" {
-		if query.Cursor != nil {
-			where = append(where, columnPrefix+"id < ?")
-			args = append(args, query.Cursor.ID)
-			whereSQL = " WHERE " + joinConditions(where)
-		}
 		sqlQuery := selectSQL + fromSQL + whereSQL + " ORDER BY " + columnPrefix + "ts DESC, " + columnPrefix + "id DESC LIMIT ?"
 		rows, err := s.db.Query(sqlQuery, append(args, query.Limit)...)
 		if err != nil {
@@ -789,11 +835,6 @@ func (s *Store) QueryMessages(query messageQuery) ([]MessageRecord, string, erro
 		nextCursor = fmt.Sprintf("%d:%d", last.TS, last.ID)
 	}
 	return result, nextCursor, nil
-}
-
-// QueryApps returns one aggregate per app for the requested filters.
-func (s *Store) QueryApps(day, deviceID string) ([]AppSummary, error) {
-	return s.queryApps(day, deviceID, 0)
 }
 
 // QueryAppsForUser limits aggregates to devices bound to one account.
@@ -1101,33 +1142,6 @@ ORDER BY bound_at DESC
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate bound devices: %w", err)
-	}
-	return result, nil
-}
-
-// DeviceIDsForUser lists the distinct devices that have messages for an account.
-func (s *Store) DeviceIDsForUser(userID int64) ([]string, error) {
-	rows, err := s.db.Query(`
-SELECT DISTINCT m.device_id
-FROM messages m
-JOIN devices d ON d.device_id = m.device_id
-WHERE d.user_id = ?
-ORDER BY m.device_id
-`, userID)
-	if err != nil {
-		return nil, fmt.Errorf("query history device ids: %w", err)
-	}
-	defer rows.Close()
-	result := make([]string, 0)
-	for rows.Next() {
-		var deviceID string
-		if err := rows.Scan(&deviceID); err != nil {
-			return nil, fmt.Errorf("scan history device id: %w", err)
-		}
-		result = append(result, deviceID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate history device ids: %w", err)
 	}
 	return result, nil
 }

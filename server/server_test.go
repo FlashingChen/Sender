@@ -40,6 +40,14 @@ func newTestApp(t *testing.T) *testApp {
 
 func newTestAppAt(t *testing.T, location *time.Location) *testApp {
 	t.Helper()
+	return newTestAppWithOptions(t, location, HandlerOptions{
+		AllowRegistration: registrationAllowedFromEnv(),
+		AuthRateLimiter:   NewRateLimiter(authRateLimit, authRateWindow),
+	})
+}
+
+func newTestAppWithOptions(t *testing.T, location *time.Location, options HandlerOptions) *testApp {
+	t.Helper()
 	store, err := OpenStore(filepath.Join(t.TempDir(), "messages.db"), location)
 	if err != nil {
 		t.Fatalf("open test store: %v", err)
@@ -52,7 +60,7 @@ func newTestAppAt(t *testing.T, location *time.Location) *testApp {
 	if err != nil {
 		t.Fatalf("create test access token: %v", err)
 	}
-	httpServer := httptest.NewServer(NewHandler(store))
+	httpServer := httptest.NewServer(NewHandlerWithOptions(store, options))
 	testAccessTokens.Store(serverHost(httpServer.URL), accessToken)
 	app := &testApp{httpServer: httpServer, store: store, location: location, userID: user.ID}
 	t.Cleanup(func() {
@@ -193,15 +201,13 @@ func TestRegisterDevice(t *testing.T) {
 func TestRegisterDeviceIsIdempotent(t *testing.T) {
 	app := newTestApp(t)
 	registerTestDevice(t, app, "device-1", testSecretA, "Old name")
-	registerTestDevice(t, app, "device-1", testSecretB, "New name")
 
-	status, _ := uploadTestMessages(t, app, "device-1", testSecretA, []MessageInput{messageFor("old-secret", 1780000000)})
-	if status != http.StatusUnauthorized {
-		t.Fatalf("old secret status=%d, want 401", status)
-	}
-	status, body := uploadTestMessages(t, app, "device-1", testSecretB, []MessageInput{messageFor("new-secret", 1780000000)})
+	// Same-secret re-registration refreshes the name without touching binding.
+	status, body := jsonRequest(t, http.MethodPost, app.url(registerPath), map[string]string{
+		"X-Device-Secret": testSecretA,
+	}, registerRequest{DeviceID: "device-1", Name: "New name"})
 	if status != http.StatusOK {
-		t.Fatalf("new secret status=%d body=%s", status, body)
+		t.Fatalf("same-secret re-register status=%d body=%s", status, body)
 	}
 	var name string
 	if err := app.store.db.QueryRow(`SELECT name FROM devices WHERE device_id = ?`, "device-1").Scan(&name); err != nil {
@@ -209,6 +215,18 @@ func TestRegisterDeviceIsIdempotent(t *testing.T) {
 	}
 	if name != "New name" {
 		t.Fatalf("device name=%q, want New name", name)
+	}
+
+	// A different secret must be rejected and must not rotate the stored one.
+	status, body = jsonRequest(t, http.MethodPost, app.url(registerPath), map[string]string{
+		"X-Device-Secret": testSecretB,
+	}, registerRequest{DeviceID: "device-1", Name: "Squatter"})
+	if status != http.StatusConflict {
+		t.Fatalf("conflicting re-register status=%d body=%s", status, body)
+	}
+	status, _ = uploadTestMessages(t, app, "device-1", testSecretA, []MessageInput{messageFor("original-secret", 1780000000)})
+	if status != http.StatusOK {
+		t.Fatalf("original secret status=%d, want 200", status)
 	}
 }
 
@@ -1387,5 +1405,89 @@ VALUES ('device-code', 'client', 'USERCODE', 'pending', NULL, 1, 2);
 	}
 	if total != 1 || len(messages) != 1 || messages[0].Content != "legacy hello world" {
 		t.Fatalf("migrated FTS search total=%d messages=%+v", total, messages)
+	}
+}
+
+func TestOAuthDangerousSchemeRejected(t *testing.T) {
+	app := newTestApp(t)
+	cookies := loginAsTestUser(t, app)
+	for _, uri := range []string{
+		"javascript:alert(1)",
+		"data:text/html,<script>alert(1)</script>",
+		"vbscript:msgbox(1)",
+		"file:///etc/passwd",
+		"about:blank",
+		"blob:https://sender.example/x",
+	} {
+		consent := authorizeConsent(t, app, uri, "s1", cookies)
+		if consent.status != http.StatusBadRequest {
+			t.Fatalf("dangerous redirect_uri %q status=%d body=%s, want 400", uri, consent.status, consent.body)
+		}
+	}
+}
+
+func TestBindDeviceRebindRejected(t *testing.T) {
+	app := newTestApp(t)
+	status, body := jsonRequest(t, http.MethodPost, app.url(registerPath), map[string]string{
+		"X-Device-Secret": testSecretA,
+	}, registerRequest{DeviceID: "shared-device", Name: "Pixel"})
+	if status != http.StatusOK {
+		t.Fatalf("register status=%d body=%s", status, body)
+	}
+	// Owner A (the test user) binds first.
+	if err := app.store.BindDevice("shared-device", testSecretA, app.userID); err != nil {
+		t.Fatalf("bind owner A: %v", err)
+	}
+	// User B must not be able to steal the device with the same secret.
+	cookiesB := loginWebAccount(t, app, "user-b")
+	bound := formCapturedRequest(t, http.MethodPost, app.url(bindDevicePath), url.Values{
+		"device_id": {"shared-device"},
+		"secret":    {testSecretA},
+	}, cookiesB)
+	if bound.status != http.StatusConflict {
+		t.Fatalf("cross-user rebind status=%d body=%s, want 409", bound.status, bound.body)
+	}
+	ownerID, boundTo, _, err := app.store.DeviceBinding("shared-device")
+	if err != nil || !boundTo || ownerID != app.userID {
+		t.Fatalf("ownership after rejected rebind: owner=%d bound=%v err=%v", ownerID, boundTo, err)
+	}
+	// Same-owner re-bind stays idempotent.
+	again := formCapturedRequest(t, http.MethodPost, app.url(bindDevicePath), url.Values{
+		"device_id": {"shared-device"},
+		"secret":    {testSecretA},
+	}, loginAsTestUser(t, app))
+	if again.status != http.StatusOK {
+		t.Fatalf("same-owner rebind status=%d body=%s", again.status, again.body)
+	}
+}
+
+func TestCursorRequiresDay(t *testing.T) {
+	app := newTestApp(t)
+	status, body := rawRequest(t, http.MethodGet, app.url(messagesPath+"?cursor=1780000000:1"), nil, nil)
+	if status != http.StatusBadRequest {
+		t.Fatalf("cursor without day status=%d body=%s, want 400", status, body)
+	}
+}
+
+func TestAuthRateLimit(t *testing.T) {
+	app := newTestAppWithOptions(t, time.FixedZone("Asia/Shanghai", 8*60*60), HandlerOptions{
+		AllowRegistration: true,
+		AuthRateLimiter:   NewRateLimiter(2, time.Minute),
+	})
+	for attempt := 1; attempt <= 2; attempt++ {
+		status := formCapturedRequest(t, http.MethodPost, app.url(loginPath), url.Values{
+			"username": {"nobody"},
+			"password": {"wrong-password"},
+		}, nil).status
+		if status != http.StatusUnauthorized {
+			t.Fatalf("attempt %d status=%d, want 401", attempt, status)
+		}
+	}
+	status := formCapturedRequest(t, http.MethodPost, app.url(loginPath), url.Values{
+		"username": {"nobody"},
+		"password": {"wrong-password"},
+	}, nil).status
+	if status != http.StatusTooManyRequests {
+		t.Fatalf("third attempt status=%d, want 429", status)
 	}
 }

@@ -311,6 +311,11 @@ func (h *apiHandler) login(w http.ResponseWriter, r *http.Request) {
 	}
 	data.Next = safeNext(r.FormValue("next"))
 	data.Username = strings.TrimSpace(r.FormValue("username"))
+	if !h.authLimiter.Allow(clientIP(r)) {
+		data.Error = "尝试过于频繁，请稍后再试"
+		renderPage(w, http.StatusTooManyRequests, "login.html", data)
+		return
+	}
 	user, err := h.store.FindUserByUsername(data.Username)
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(r.FormValue("password"))) != nil {
 		data.Error = "用户名或密码错误"
@@ -328,6 +333,7 @@ func (h *apiHandler) login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   requestSecure(r),
 		MaxAge:   int(sessionTTL / time.Second),
 		Expires:  time.Now().UTC().Add(sessionTTL),
 	})
@@ -345,6 +351,7 @@ func (h *apiHandler) logout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   requestSecure(r),
 		MaxAge:   -1,
 		Expires:  time.Unix(1, 0).UTC(),
 	})
@@ -490,6 +497,8 @@ func (h *apiHandler) bindPage(w http.ResponseWriter, r *http.Request) {
 					data.Error = "设备密钥错误"
 				case errors.Is(bindErr, ErrDeviceNotFound):
 					data.Error = "设备不存在"
+				case errors.Is(bindErr, ErrDeviceAlreadyBound):
+					data.Error = "设备已被其他账号绑定"
 				default:
 					writePageError(w, http.StatusInternalServerError, "绑定失败")
 					return
@@ -584,6 +593,13 @@ func authorizationRequestFromValues(values url.Values) (authorizationRequest, er
 	}
 }
 
+// requestSecure reports whether the request arrived over TLS: either directly
+// or through a trusted TLS-terminating reverse proxy that sets the standard
+// X-Forwarded-Proto header.
+func requestSecure(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
 func validRedirectURI(raw string) bool {
 	if raw == oobRedirectURI {
 		return true
@@ -606,7 +622,14 @@ func validRedirectURI(raw string) bool {
 		host := strings.ToLower(parsed.Hostname())
 		return host == "localhost" || host == "127.0.0.1"
 	}
-	return true
+	switch scheme {
+	case "javascript", "data", "vbscript", "file", "about", "blob":
+		// Custom schemes are allowed for mobile deep links (sender://), but
+		// scheme-capable execution vectors must never be redirect targets.
+		return false
+	default:
+		return true
+	}
 }
 
 func historyPageURL(values url.Values, page int) string {

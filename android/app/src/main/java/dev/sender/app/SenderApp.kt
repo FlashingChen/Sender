@@ -31,6 +31,7 @@ class SenderApp : Application() {
             deviceName = identity.deviceName,
             isRegistered = { settings.registered },
             markRegistered = { settings.registered = true },
+            resetRegistered = { settings.registered = false },
             repository = RoomSyncRepository(database),
             api = api,
         )

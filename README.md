@@ -12,10 +12,11 @@ flowchart LR
 ## 目录结构
 
 ```
-server/          服务端（Go + SQLite，含 Web UI 与 OAuth）
+server/          服务端（Go + SQLite，含 Web UI、OAuth 与 sender CLI）
 android/         安卓端（Kotlin + Compose，通知采集器「通知采集」）
-dist/            构建产物：sender-server（Mac 二进制）、sender-server-linux-amd64、Sender-debug.apk
+dist/            构建产物：sender-server（Mac 二进制）、sender-server-linux-amd64、sender（CLI）、Sender-debug.apk
 data/            服务端生产数据库（messages.db，备份 = 拷贝这个文件）
+DEPLOY.md        部署教程：服务端部署 + 安卓端安装/权限 + 绑定 + 排查
 design/          Web UI 设计稿（三个方向初稿 + 已选定的 Terminal 方向）
 tasks/           各阶段任务书（发给 agent 的 /goal 文档）
 AGENTS.md        Agent 规则：下次会话的入口（定位/运行/约定/下一步）
@@ -29,7 +30,7 @@ AGENTS.md        Agent 规则：下次会话的入口（定位/运行/约定/下
 ./dist/sender-server            # 监听 :8080，数据存 data/messages.db
 ```
 
-环境变量：`ADDR`（默认 `:8080`）、`DB_PATH`（默认 `data/messages.db`）、`TZ`（默认 `Asia/Shanghai`，消息按此归天）、`ALLOW_REGISTRATION`（默认 `true`；注册完自己的账号后设 `false`，关闭所有注册入口）。
+环境变量：`ADDR`（默认 `:8080`）、`DB_PATH`（默认 `data/messages.db`）、`TZ`（默认 `Asia/Shanghai`，消息按此归天）、`ALLOW_REGISTRATION`（本机二进制默认 `true`，Docker 镜像默认 `false`；设备注册完成后设 `false`，关闭所有注册入口）。
 
 ### 服务端（Docker）
 
@@ -54,14 +55,26 @@ cd server && docker compose up -d --build
 
 ## 给 agent 的接入说明
 
-把服务器地址交给 agent 后，agent 用 OAuth **授权码 + PKCE** 流程自行完成授权（与 Google/Claude Code 一致），然后按天查数据：
+推荐直接用仓库里的 `sender` CLI（`cd server && go build -o dist/sender ./cmd/sender`），
+agent 不用手写 HTTP、不用复制粘贴 code：
 
-1. agent 生成 PKCE 对（S256）和 `state`，拼出授权链接 `/authorize?response_type=code&client_id=…&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`。
-2. 把链接给用户。用户点开、登录、在 sudo 式同意页点「批准 (y)」：
-   - 有回调能力：浏览器 302 回 `redirect_uri?code=…&state=…`（loopback 回调如 `http://localhost:PORT/callback` 为标准做法）；
-   - 无回调能力：用 `redirect_uri=urn:ietf:wg:oauth:2.0:oob`，用户把页面上的一次性 code 复制回贴给 agent。
-3. agent 拿 `code + code_verifier + client_id + redirect_uri` 调 `POST /api/v1/oauth/token`（`grant_type=authorization_code`）换 `access_token`（7 天有效）。
-4. 带 `Authorization: Bearer <token>` 调 `GET /api/v1/messages?day=YYYY-MM-DD` 或 `GET /api/v1/apps`。
+```sh
+sender login                   # 浏览器打开授权页，用户点「批准」即完成登录（Google/gcloud 式 loopback 回调）
+sender messages --day 2026-08-12
+sender apps --day 2026-08-12
+```
+
+自己实现 HTTP 调用时：agent 生成 PKCE 对（S256）和 `state`，拼出授权链接
+`/authorize?response_type=code&client_id=…&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`。
+用户点开、登录、在 sudo 式同意页点「批准 (y)」：
+
+- 有回调能力（推荐）：`redirect_uri` 用 loopback 地址 `http://127.0.0.1:PORT/callback`，
+  浏览器 302 回本地回调，agent 直接拿到 `code`，用户无需复制粘贴；
+- 无回调能力：用 `redirect_uri=urn:ietf:wg:oauth:2.0:oob`，用户把页面上的一次性 code 复制回贴给 agent。
+
+然后 agent 拿 `code + code_verifier + client_id + redirect_uri` 调
+`POST /api/v1/oauth/token`（`grant_type=authorization_code`）换 `access_token`（7 天有效），
+带 `Authorization: Bearer <token>` 调 `GET /api/v1/messages?day=YYYY-MM-DD` 或 `GET /api/v1/apps`。
 
 token 只能看到**绑定到你账号的设备**的数据。完整示例见 `server/README.md`。
 
@@ -81,9 +94,11 @@ token 只能看到**绑定到你账号的设备**的数据。完整示例见 `se
 
 ## 安全说明
 
-- 数据敏感（微信等消息原文）。服务端明文 HTTP 仅供局域网；对外暴露务必置于 HTTPS 反向代理后（`X-Forwarded-Proto` 已支持）。
+- 数据敏感（微信等消息原文）。服务端明文 HTTP 仅供局域网；对外暴露务必置于 HTTPS 反向代理后（`X-Forwarded-Proto` 已支持，会话 cookie 会自动带上 `Secure`）。
 - 三层写侧防护：设备密钥鉴权 → 设备必须绑定账号才可上报 → `ALLOW_REGISTRATION=false` 关闭注册。
+- 注册/登录/换 token 接口按 IP 限流（10 次/5 分钟）；已注册设备的密钥不可通过注册接口轮换（冲突返回 409）；设备不可被其他账号改绑（409）。
 - 密码 bcrypt 存储；会话与 token 均存 SHA-256 哈希；OAuth 授权码强制 PKCE。
+- 安卓端：设备密钥用 AndroidKeyStore AES-GCM 加密落盘，`allowBackup=false` 禁止备份；App 内对非回环 `http://` 地址显示明文警告。
 - 备份：复制 `data/messages.db` 即可。
 
 ## 阶段状态

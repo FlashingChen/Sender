@@ -26,9 +26,17 @@ ADDR=:9090 DB_PATH=/tmp/sender.db TZ=UTC ALLOW_REGISTRATION=true go run ./cmd/se
 `TZ` controls the `day` stored for each Unix-second `ts`. The default is
 `Asia/Shanghai`. It must be an installed IANA time-zone name.
 
-`ALLOW_REGISTRATION` defaults to `true`. After registering your own account,
-set `ALLOW_REGISTRATION=false` to close both the Web and device-registration
+`ALLOW_REGISTRATION` defaults to `true` when unset (local runs), but the
+Docker image ships with `ALLOW_REGISTRATION=false`. Device registration only
+happens once per device, so a recommended flow is: start with
+`ALLOW_REGISTRATION=true`, register your account and all devices, then set it
+to `false` and restart to close both the Web and device-registration
 interfaces.
+
+Registration is rate limited (10 attempts per IP per 5 minutes), and an
+existing device's secret is never rotated: re-registering the same
+`device_id` with the same secret is idempotent (only the display name
+updates), while a conflicting secret returns `409`.
 
 Health check:
 
@@ -36,6 +44,26 @@ Health check:
 curl http://localhost:8080/healthz
 # {"ok":true}
 ```
+
+## TLS
+
+The server itself speaks plain HTTP by default. Two supported options:
+
+1. **Reverse proxy (recommended)**: terminate TLS at nginx/Caddy/cloudflare
+   and forward to the server. The session cookie automatically gets the
+   `Secure` flag when the request arrives with `X-Forwarded-Proto: https`.
+2. **Direct TLS**: set `TLS_CERT` and `TLS_KEY` to PEM file paths and the
+   server serves HTTPS itself:
+
+   ```sh
+   TLS_CERT=/etc/letsencrypt/live/example.com/fullchain.pem \
+   TLS_KEY=/etc/letsencrypt/live/example.com/privkey.pem \
+   go run ./cmd/server
+   ```
+
+Exposing the plaintext port to an untrusted network leaks the session cookie,
+device secrets, and all captured message content; prefer TLS whenever the
+server is reachable beyond localhost.
 
 ## Docker Compose
 
@@ -84,7 +112,9 @@ page. Approving redirects the browser back to `redirect_uri` with
 `http://127.0.0.1[:port]/*` (loopback), any `https://*`, any non-http custom
 scheme (mobile apps may use `sender://`), or the OOB fallback
 `urn:ietf:wg:oauth:2.0:oob` which renders the code on a page instead of
-redirecting. Everything else is rejected.
+redirecting. Everything else is rejected. Scheme-capable execution vectors
+(`javascript:`, `data:`, `vbscript:`, `file:`, `about:`, `blob:`) are always
+rejected even though they are non-http.
 
 Authorization codes are 32 hex characters, expire after 300 seconds, are
 single-use, and are stored hashed (SHA-256) and bound to
@@ -122,6 +152,39 @@ single-use, and are stored hashed (SHA-256) and bound to
    expired, or reused code; PKCE, redirect, or client mismatch),
    `invalid_client`, `server_error`.
 
+### Sender CLI (recommended for agents)
+
+`cmd/sender` is the agent-facing CLI: it runs the OAuth flow itself and wraps
+the query API, so agents never handle HTTP or paste codes. Login uses the
+RFC 8252 loopback flow — the CLI binds a `127.0.0.1` listener, opens the
+browser, and the user's single click on 批准 completes the authorization
+(Google/gcloud style). No code is ever shown or copied.
+
+Build and install:
+
+```sh
+cd server
+go build -o dist/sender ./cmd/sender
+```
+
+Commands:
+
+```sh
+sender login                  # 浏览器点「批准」即完成，无需复制 code
+sender login --no-browser     # 只打印授权链接（SSH/无浏览器环境）
+sender status                 # 登录状态、token 过期时间、服务端健康
+sender messages --day 2026-08-12
+sender messages --day 2026-08-12 --app com.tencent.mm --limit 500
+sender apps --day 2026-08-12
+sender logout                 # 删除本地凭证
+```
+
+Output is JSON by default (the raw API payload, ready for agent
+consumption); add `--text` for a human-readable table. Environment
+overrides: `SENDER_SERVER`, `SENDER_TOKEN` (stateless agent calls without a
+config file), `SENDER_CONFIG` (default `~/.config/sender/config.json`,
+written 0600). See `sender help` for the full flag list.
+
 ### OOB fallback (no callback receiver)
 
 Use `redirect_uri=urn:ietf:wg:oauth:2.0:oob`. After approval the server
@@ -148,7 +211,9 @@ curl -i -X POST http://localhost:8080/api/v1/devices/register \
 ```
 
 Bind the registered device with either a logged-in session cookie or a Bearer
-access token (the Android app binds with its access token):
+access token (the Android app binds with its access token). A device can only
+be bound to one account: re-binding a device already owned by another account
+returns `409`, while re-binding to the same account is idempotent:
 
 ```sh
 curl -i -X POST http://localhost:8080/api/v1/devices/bind \
@@ -188,21 +253,33 @@ curl "http://localhost:8080/api/v1/apps?day=$DAY&device_id=$DEVICE_ID" \
 
 The token only returns messages from devices bound to its account. `limit`
 defaults to 100 and is capped at 500. For day-scoped pagination, `cursor` is
-the previous page's last composite `ts:id` key, for example `1785690100:8`.
-Numeric-only cursors are invalid. Results are ordered by `ts` ascending with
-`id` as the deterministic tie-breaker. Omit `day` to get the most recent
-`limit` messages; optional `device_id` and `app` filters work with either form.
+the previous page's last composite `ts:id` key, for example `1785690100:8`;
+a cursor without a `day` filter is rejected. Numeric-only cursors are
+invalid. Results are ordered by `ts` ascending with `id` as the
+deterministic tie-breaker. Omit `day` to get the most recent `limit`
+messages; optional `device_id` and `app` filters work with either form.
 
 ## 给 agent 的接入说明
 
-agent 先拿授权，再带 access token 查询账号已绑定设备的数据。
+推荐直接用仓库里的 `sender` CLI（`cd server && go build -o dist/sender ./cmd/sender`），
+agent 只需执行命令，不需要手写 HTTP、不需要复制粘贴 code：
+
+```sh
+sender login                   # 浏览器打开授权页，用户点「批准」即完成登录
+sender messages --day 2026-08-12
+sender apps --day 2026-08-12
+```
+
+想自己实现 HTTP 调用时：先拿授权，再带 access token 查询账号已绑定设备的数据。
 
 1. 生成 PKCE 对（S256）和 `state`，拼出
    `/authorize?response_type=code&client_id=…&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`。
 2. 把链接给用户。用户登录后点「批准 (y)」：
-   - 有回调：浏览器 302 回 `redirect_uri?code=…&state=…`；
-   - 无回调：用 `redirect_uri=urn:ietf:wg:oauth:2.0:oob`，用户把页面上的
-     一次性 code 复制回给你。
+   - 有回调能力（推荐）：`redirect_uri` 用 loopback 地址
+     `http://127.0.0.1:PORT/callback`，浏览器 302 回本地回调，agent 直接收到
+     `code`，用户不用做任何复制粘贴；
+   - 无回调能力：用 `redirect_uri=urn:ietf:wg:oauth:2.0:oob`，用户把页面上的一次性
+     code 复制回给你。
 3. 拿 `code` + `code_verifier` + `client_id` + `redirect_uri` 调
    `POST /api/v1/oauth/token`（`grant_type=authorization_code`），换
    `access_token`（7 天有效）。

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strconv"
@@ -36,6 +37,9 @@ const (
 
 type HandlerOptions struct {
 	AllowRegistration bool
+	// AuthRateLimiter throttles the unauthenticated register, login, and
+	// token endpoints per client IP. Nil disables throttling.
+	AuthRateLimiter *RateLimiter
 }
 
 type registerRequest struct {
@@ -82,12 +86,19 @@ type bindDeviceRequest struct {
 
 // NewHandler returns the complete API and Web UI router for store.
 func NewHandler(store *Store) http.Handler {
-	return NewHandlerWithOptions(store, HandlerOptions{AllowRegistration: registrationAllowedFromEnv()})
+	return NewHandlerWithOptions(store, HandlerOptions{
+		AllowRegistration: registrationAllowedFromEnv(),
+		AuthRateLimiter:   NewRateLimiter(authRateLimit, authRateWindow),
+	})
 }
 
 func NewHandlerWithOptions(store *Store, options HandlerOptions) http.Handler {
 	mux := http.NewServeMux()
-	handler := &apiHandler{store: store, allowRegistration: options.AllowRegistration}
+	handler := &apiHandler{
+		store:             store,
+		allowRegistration: options.AllowRegistration,
+		authLimiter:       options.AuthRateLimiter,
+	}
 	mux.HandleFunc(healthPath, handler.health)
 	mux.HandleFunc(apiHealthPath, handler.health)
 	mux.HandleFunc(registerPath, handler.register)
@@ -111,6 +122,7 @@ func NewHandlerWithOptions(store *Store, options HandlerOptions) http.Handler {
 type apiHandler struct {
 	store             *Store
 	allowRegistration bool
+	authLimiter       *RateLimiter
 }
 
 func registrationAllowedFromEnv() bool {
@@ -142,6 +154,10 @@ func (h *apiHandler) register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
+	if !h.authLimiter.Allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "too many requests")
+		return
+	}
 	if !h.allowRegistration {
 		writeError(w, http.StatusForbidden, "registration disabled")
 		return
@@ -161,7 +177,12 @@ func (h *apiHandler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.RegisterDevice(strings.TrimSpace(request.DeviceID), request.Name, secret); err != nil {
-		writeError(w, http.StatusInternalServerError, "could not register device")
+		switch {
+		case errors.Is(err, ErrDeviceExists):
+			writeError(w, http.StatusConflict, "device already registered with a different secret")
+		default:
+			writeError(w, http.StatusInternalServerError, "could not register device")
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -212,7 +233,8 @@ func (h *apiHandler) deviceMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	inserted, duplicates, err := h.store.InsertMessages(deviceID, request.Messages)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		log.Printf("insert messages for device %s: %v", deviceID, err)
+		writeError(w, http.StatusBadRequest, "could not insert messages")
 		return
 	}
 	writeJSON(w, http.StatusOK, messageBatchResponse{Inserted: inserted, Duplicates: duplicates})
@@ -314,6 +336,8 @@ func (h *apiHandler) bindDevice(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid device secret")
 		case errors.Is(err, ErrDeviceNotFound):
 			writeError(w, http.StatusBadRequest, "device not found")
+		case errors.Is(err, ErrDeviceAlreadyBound):
+			writeError(w, http.StatusConflict, "device already bound to another account")
 		default:
 			writeError(w, http.StatusInternalServerError, "could not bind device")
 		}
@@ -325,6 +349,10 @@ func (h *apiHandler) bindDevice(w http.ResponseWriter, r *http.Request) {
 func (h *apiHandler) token(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeOAuthError(w, http.StatusMethodNotAllowed, "invalid_request")
+		return
+	}
+	if !h.authLimiter.Allow(clientIP(r)) {
+		writeOAuthError(w, http.StatusTooManyRequests, "too_many_requests")
 		return
 	}
 	var request tokenRequest
@@ -410,6 +438,9 @@ func parseMessageQuery(r *http.Request) (messageQuery, error) {
 			return messageQuery{}, errors.New("cursor must use ts:id format")
 		}
 		result.Cursor = &messageCursor{TS: ts, ID: id}
+	}
+	if result.Cursor != nil && result.Day == "" {
+		return messageQuery{}, errors.New("cursor requires a day filter")
 	}
 	return result, nil
 }

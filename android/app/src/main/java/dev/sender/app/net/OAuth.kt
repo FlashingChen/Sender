@@ -2,7 +2,6 @@ package dev.sender.app.net
 
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLDecoder
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -106,7 +105,7 @@ object OAuthCallback {
         val params = query.split('&')
             .mapNotNull { part ->
                 val kv = part.split('=', limit = 2)
-                if (kv.size == 2) kv[0] to urlDecode(kv[1]) else null
+                if (kv.size == 2) kv[0] to uriDecode(kv[1]) else null
             }
             .toMap()
         val code = params["code"]
@@ -117,10 +116,35 @@ object OAuthCallback {
         }
     }
 
-    private fun urlDecode(value: String): String = try {
-        URLDecoder.decode(value, Charsets.UTF_8.name())
-    } catch (_: IllegalArgumentException) {
-        value
+    /**
+     * RFC 3986 percent-decoding. Unlike URLDecoder (form semantics), a literal
+     * '+' in a URI query is data and must not become a space.
+     */
+    private fun uriDecode(value: String): String {
+        val output = StringBuilder(value.length)
+        val bytes = ArrayList<Byte>(4)
+        var i = 0
+        while (i < value.length) {
+            val c = value[i]
+            if (c == '%' && i + 2 < value.length) {
+                val code = value.substring(i + 1, i + 3).toIntOrNull(16)
+                if (code != null) {
+                    bytes.add(code.toByte())
+                    i += 3
+                    continue
+                }
+            }
+            if (bytes.isNotEmpty()) {
+                output.append(String(bytes.toByteArray(), Charsets.UTF_8))
+                bytes.clear()
+            }
+            output.append(c)
+            i++
+        }
+        if (bytes.isNotEmpty()) {
+            output.append(String(bytes.toByteArray(), Charsets.UTF_8))
+        }
+        return output.toString()
     }
 }
 

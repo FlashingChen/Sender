@@ -93,6 +93,14 @@ fun SettingsScreen(
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+            val trimmedUrl = url.trim().trimEnd('/')
+            if (isCleartextNonLoopback(trimmedUrl)) {
+                Text(
+                    "警告：http 为明文传输，设备密钥与消息内容会被网络上的监听者截获；建议改用 https。",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(onClick = {
                     app.settings.serverUrl = url.trim().trimEnd('/')
@@ -171,26 +179,24 @@ fun SettingsScreen(
                     copiedLabel = "deviceId"
                 },
             )
+            // 设备密钥只展示不提供复制：剪贴板可被其他应用读取。
             DeviceInfoRow(
                 label = "设备密钥",
                 value = app.identity.secret,
-                copied = copiedLabel == "secret",
-                onCopy = {
-                    clipboard.setPrimaryClip(ClipData.newPlainText("secret", app.identity.secret))
-                    copiedLabel = "secret"
-                },
+                copied = false,
+                onCopy = null,
             )
         }
     }
 }
 
-/** Read-only label+value row with a copy button (system ClipboardManager). */
+/** Read-only label+value row with an optional copy button (system ClipboardManager). */
 @Composable
 private fun DeviceInfoRow(
     label: String,
     value: String,
     copied: Boolean,
-    onCopy: () -> Unit,
+    onCopy: (() -> Unit)?,
 ) {
     Row(
         Modifier.fillMaxWidth(),
@@ -205,8 +211,18 @@ private fun DeviceInfoRow(
             )
             Text(value, style = MaterialTheme.typography.bodyMedium)
         }
-        OutlinedButton(onClick = onCopy) {
-            Text(if (copied) "已复制" else "复制")
+        if (onCopy != null) {
+            OutlinedButton(onClick = onCopy) {
+                Text(if (copied) "已复制" else "复制")
+            }
         }
     }
+}
+
+/** http:// to a non-loopback host rides the wire in cleartext. */
+private fun isCleartextNonLoopback(raw: String): Boolean = try {
+    val uri = java.net.URI(raw)
+    uri.scheme == "http" && uri.host !in setOf("localhost", "127.0.0.1", "10.0.2.2")
+} catch (_: Exception) {
+    false
 }

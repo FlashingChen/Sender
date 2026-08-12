@@ -41,7 +41,7 @@ class SyncEngineTest {
         var registerCalls = 0
         var registerResult = true
         var uploadCalls = 0
-        var uploadResult = true
+        var uploadResult = UploadResult.SUCCESS
         val uploadBodies = mutableListOf<String>()
 
         override suspend fun register(deviceId: String, secret: String, deviceName: String): Boolean {
@@ -49,7 +49,7 @@ class SyncEngineTest {
             return registerResult
         }
 
-        override suspend fun upload(deviceId: String, secret: String, body: String): Boolean {
+        override suspend fun upload(deviceId: String, secret: String, body: String): UploadResult {
             uploadCalls++
             uploadBodies += body
             return uploadResult
@@ -102,9 +102,32 @@ class SyncEngineTest {
     fun uploadFailure_keepsSyncedFalse() = runBlocking {
         registered = true
         repo.add("m1")
-        api.uploadResult = false
+        api.uploadResult = UploadResult.FAILED
         val result = engine().sync()
         assertEquals(SyncResult.UPLOAD_FAILED, result)
+        assertEquals(1, repo.pendingCount())
+    }
+
+    /** 401/403 resets the registered flag so the next sync re-registers. */
+    @Test
+    fun authFailure_resetsRegisteredFlag() = runBlocking {
+        registered = true
+        var resetCalls = 0
+        repo.add("m1")
+        api.uploadResult = UploadResult.AUTH_FAILED
+        val engine = SyncEngine(
+            deviceId = "11111111-1111-1111-1111-111111111111",
+            secret = "abcdef0123456789abcdef0123456789",
+            deviceName = "Pixel 8",
+            isRegistered = { registered },
+            markRegistered = { registered = true },
+            resetRegistered = { resetCalls++; registered = false },
+            repository = repo,
+            api = api,
+        )
+        assertEquals(SyncResult.UPLOAD_FAILED, engine.sync())
+        assertFalse(registered)
+        assertEquals(1, resetCalls)
         assertEquals(1, repo.pendingCount())
     }
 

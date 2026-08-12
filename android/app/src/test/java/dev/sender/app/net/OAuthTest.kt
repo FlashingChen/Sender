@@ -108,6 +108,15 @@ class OAuthTest {
         assertEquals("xyz", cb.state)
     }
 
+    /** RFC 3986: a literal '+' in the query is data, not a form-encoded space. */
+    @Test
+    fun callback_keepsLiteralPlusAndDecodesPercentEscapes() {
+        val cb = OAuthCallback.parse("sender://oauth?code=a+b%2Bc&state=%E4%B8%AD")
+        assertTrue(cb is OAuthCallback.Callback.Code)
+        assertEquals("a+b+c", (cb as OAuthCallback.Callback.Code).code)
+        assertEquals("中", cb.state)
+    }
+
     /** Callback with error -> Error(error, state), e.g. access_denied (user cancel). */
     @Test
     fun callback_parsesErrorBranch() {
