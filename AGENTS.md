@@ -15,12 +15,12 @@
 - 安卓：Kotlin + Compose、Room、WorkManager、NotificationListenerService；Gradle 8.13 / AGP 8.7.3 / Kotlin 2.0.21。
 
 ## 目录与约定
-- `server/` 服务端（`cmd/server` 主服务，`cmd/sender` 为 agent CLI）；`android/` 采集端；`design/` Web UI 设计定稿（direction-approved.md + draft-2-terminal.html）；`tasks/` 任务书；`data/` 生产数据库。
+- `server/` 服务端（`cmd/server` 主服务，`cmd/sender` 为 agent CLI）；`android/` 采集端；`design/` Web UI 设计定稿（direction-approved.md + draft-2-terminal.html）；`tasks/` 任务书；`AGENT_ACCESS.md` agent 接入说明（CLI 用法 + 手动 OAuth 流程，README 只留入口）；`data/` 生产数据库。
 - `data/`、`dist/`、`*.db*` 已 gitignore，永不入库（含真实消息与设备密钥）；备份 = 复制 data/messages.db。
 - 上报契约：`client_msg_id = 包名:通知key:postTime毫秒` 幂等去重；单批 ≤500；2xx 才标 synced。
 - 采集层截断是固有限制（微信约几十字、X 约 280 字），服务端存的就是手机采到的原文。
 
 ## 当前状态与下一步
 - 阶段一~三完成并已上线（本机 `./dist/sender-server` 运行中，/healthz OK）；origin/main 与本地一致。
-- 已交付：`server/cmd/sender` CLI（login 走 RFC 8252 loopback 授权，浏览器点「批准」即完成，无需粘贴 code；messages/apps/status/logout，默认 JSON 输出；`SENDER_SERVER`/`SENDER_TOKEN`/`SENDER_CONFIG` 环境变量），全量测试 75 绿 0 skip。
+- 已交付：`server/cmd/sender` CLI（login 走 RFC 8252 loopback 授权，浏览器点「批准」即完成，无需粘贴 code；messages/apps/status/logout，默认 JSON 输出；`SENDER_SERVER`/`SENDER_TOKEN`/`SENDER_CONFIG` 环境变量），全量测试 75 绿 0 skip。仓库已公开（github.com/FlashingChen/Sender），agent 接入说明在 AGENT_ACCESS.md（README 不再内嵌）。
 - 下一步：执行 `tasks/fix-appshare-label.md`（概览页 App 占比渲染 AppName，领导已裁决允许动 store.go）；执行时按任务书更新 server/BLOCKED.md 与 server/PROGRESS.md。

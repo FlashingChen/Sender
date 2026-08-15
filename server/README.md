@@ -261,31 +261,8 @@ messages; optional `device_id` and `app` filters work with either form.
 
 ## 给 agent 的接入说明
 
-推荐直接用仓库里的 `sender` CLI（`cd server && go build -o dist/sender ./cmd/sender`），
-agent 只需执行命令，不需要手写 HTTP、不需要复制粘贴 code：
-
-```sh
-sender login                   # 浏览器打开授权页，用户点「批准」即完成登录
-sender messages --day 2026-08-12
-sender apps --day 2026-08-12
-```
-
-想自己实现 HTTP 调用时：先拿授权，再带 access token 查询账号已绑定设备的数据。
-
-1. 生成 PKCE 对（S256）和 `state`，拼出
-   `/authorize?response_type=code&client_id=…&redirect_uri=…&code_challenge=…&code_challenge_method=S256&state=…`。
-2. 把链接给用户。用户登录后点「批准 (y)」：
-   - 有回调能力（推荐）：`redirect_uri` 用 loopback 地址
-     `http://127.0.0.1:PORT/callback`，浏览器 302 回本地回调，agent 直接收到
-     `code`，用户不用做任何复制粘贴；
-   - 无回调能力：用 `redirect_uri=urn:ietf:wg:oauth:2.0:oob`，用户把页面上的一次性
-     code 复制回给你。
-3. 拿 `code` + `code_verifier` + `client_id` + `redirect_uri` 调
-   `POST /api/v1/oauth/token`（`grant_type=authorization_code`），换
-   `access_token`（7 天有效）。
-4. 用 `Authorization: Bearer <access_token>` 调用 `GET /api/v1/messages`
-   或 `GET /api/v1/apps`；也可以用该 token 调 `POST /api/v1/devices/bind`
-   绑定设备。
+agent 接入（CLI 用法 + 手动 OAuth 流程 + 权限边界 + 错误处理）统一维护在
+仓库根目录的 [`AGENT_ACCESS.md`](../AGENT_ACCESS.md)，README 不再重复。
 
 Invalid JSON and invalid request parameters return a JSON error object such
 as `{"error":"invalid JSON"}`. Unknown paths return 404. Production databases
