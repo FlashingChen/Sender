@@ -10,11 +10,21 @@ enum class UploadResult {
     FAILED,
 }
 
+/**
+ * Result of device registration. DISABLED (403) means the server has closed
+ * registration (ALLOW_REGISTRATION=false) — the only remediable-by-user case.
+ */
+enum class RegisterResult {
+    OK,
+    DISABLED,
+    FAILED,
+}
+
 /** Server contract endpoints, client side. */
 interface Api {
 
-    /** POST /api/v1/devices/register with X-Device-Secret header; true = 2xx. */
-    suspend fun register(deviceId: String, secret: String, deviceName: String): Boolean
+    /** POST /api/v1/devices/register with X-Device-Secret header. */
+    suspend fun register(deviceId: String, secret: String, deviceName: String): RegisterResult
 
     /** POST /api/v1/devices/{deviceId}/messages with Authorization: Bearer header. */
     suspend fun upload(deviceId: String, secret: String, body: String): UploadResult

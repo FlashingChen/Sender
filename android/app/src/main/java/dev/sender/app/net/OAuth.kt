@@ -51,6 +51,12 @@ object PkceGenerator {
 /** Pending authorize state between launching the browser and the callback. */
 data class PendingAuth(val state: String, val verifier: String, val challenge: String)
 
+/** Device-bind outcome: Ok carries the bound account name, Err a displayable reason. */
+sealed interface BindResult {
+    data class Ok(val username: String) : BindResult
+    data class Err(val reason: String) : BindResult
+}
+
 /**
  * Process-wide holder for the in-flight OAuth attempt. Lives outside the
  * Activity so rotation / recreation doesn't lose state before the callback.
@@ -192,8 +198,40 @@ class OAuth(
         }
     }
 
-    /** POST /api/v1/devices/bind with Bearer token; returns username or null. */
-    suspend fun bind(accessToken: String, deviceId: String, secret: String): String? =
+    /**
+     * POST /api/v1/devices/register with X-Device-Secret; OK=2xx, DISABLED=403
+     * (server closed registration), FAILED=anything else (network or 5xx).
+     */
+    suspend fun register(deviceId: String, secret: String, deviceName: String): RegisterResult =
+        withContext(Dispatchers.IO) {
+            val body = """{"device_id":${PayloadBuilder.jsonString(deviceId)},"name":${PayloadBuilder.jsonString(deviceName)}}"""
+            val conn = connectionFactory("${serverUrl().trim().trimEnd('/')}/api/v1/devices/register")
+            try {
+                conn.requestMethod = "POST"
+                conn.connectTimeout = 10_000
+                conn.readTimeout = 15_000
+                conn.doOutput = true
+                conn.setRequestProperty("X-Device-Secret", secret)
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+                when (conn.responseCode) {
+                    in 200..299 -> RegisterResult.OK
+                    403 -> RegisterResult.DISABLED
+                    else -> RegisterResult.FAILED
+                }
+            } catch (_: Exception) {
+                RegisterResult.FAILED
+            } finally {
+                conn.disconnect()
+            }
+        }
+
+    /**
+     * POST /api/v1/devices/bind with Bearer token. Ok carries the account
+     * name; Err carries a user-displayable reason so the UI can say what
+     * actually went wrong instead of a generic retry hint.
+     */
+    suspend fun bind(accessToken: String, deviceId: String, secret: String): BindResult =
         withContext(Dispatchers.IO) {
             val body = """{"device_id":${PayloadBuilder.jsonString(deviceId)},"secret":${PayloadBuilder.jsonString(secret)}}"""
             val conn = connectionFactory("${serverUrl().trim().trimEnd('/')}/api/v1/devices/bind")
@@ -205,15 +243,35 @@ class OAuth(
                 conn.setRequestProperty("Authorization", "Bearer $accessToken")
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-                if (conn.responseCode !in 200..299) return@withContext null
-                val response = responseBody(conn) ?: return@withContext null
-                if (!jsonBoolean(response, "ok")) null else jsonString(response, "username")
+                val code = conn.responseCode
+                val response = responseBody(conn)
+                when {
+                    code in 200..299 && response != null && jsonBoolean(response, "ok") ->
+                        BindResult.Ok(jsonString(response, "username") ?: return@withContext BindResult.Err("服务器响应缺少用户名"))
+                    code == 400 -> BindResult.Err(bindBadRequestReason(response))
+                    code == 401 -> BindResult.Err("授权已失效，请重新绑定")
+                    code == 403 -> BindResult.Err("服务器拒绝了绑定请求")
+                    code == 409 -> BindResult.Err("设备已被其他账号绑定")
+                    code == 429 -> BindResult.Err("操作过于频繁，请稍后再试")
+                    code in 500..599 -> BindResult.Err("服务器错误（HTTP $code），请稍后重试")
+                    else -> BindResult.Err("绑定失败（HTTP $code）")
+                }
             } catch (_: Exception) {
-                null
+                BindResult.Err("网络请求失败，请检查网络与服务器地址")
             } finally {
                 conn.disconnect()
             }
         }
+
+    private fun bindBadRequestReason(response: String?): String {
+        val error = response?.let { jsonString(it, "error") }
+        return when (error) {
+            "device not found" -> "设备未注册：请先让应用完成注册（上报一次）后再绑定"
+            "invalid device secret" -> "设备密钥不匹配，请检查设备信息"
+            "device already bound to another account" -> "设备已被其他账号绑定"
+            else -> "绑定请求无效（${error ?: "HTTP 400"}）"
+        }
+    }
 
     private fun formEncode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
 

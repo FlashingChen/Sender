@@ -152,7 +152,7 @@ fun SettingsScreen(
             HorizontalDivider()
             Text("设备 ID：${app.identity.deviceId}", style = MaterialTheme.typography.bodySmall)
             Text(
-                "注册状态：${if (app.settings.registered) "已注册" else "未注册（首次上报时自动注册）"}",
+                "注册状态：${if (app.settings.registered) "已注册" else "未注册（首次上报或绑定时自动注册）"}",
                 style = MaterialTheme.typography.bodySmall,
             )
             HorizontalDivider()

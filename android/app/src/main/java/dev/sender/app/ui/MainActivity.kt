@@ -13,9 +13,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import dev.sender.app.SenderApp
+import dev.sender.app.net.BindResult
 import dev.sender.app.net.OAuth
 import dev.sender.app.net.OAuthCallback
 import dev.sender.app.net.OAuthSession
+import dev.sender.app.net.RegisterResult
 import kotlinx.coroutines.launch
 
 sealed interface Screen {
@@ -135,12 +137,32 @@ class MainActivity : ComponentActivity() {
                     val oauth = OAuth(serverUrl = { server })
                     lifecycleScope.launch {
                         val token = oauth.exchangeToken(callback.code, verifier)
-                        val username = token?.let { oauth.bind(it, app.identity.deviceId, app.identity.secret) }
-                        oauthUi.value = if (username == null) {
-                            OAuthUi.Failed("绑定失败，请重试")
-                        } else {
-                            app.settings.boundUsername = username
-                            OAuthUi.Success(username)
+                        if (token == null) {
+                            oauthUi.value = OAuthUi.Failed("授权码无效或已过期，请重新绑定")
+                            oauthProcessing = false
+                            return@launch
+                        }
+                        // 设备注册只发生在首次上报；新手机可能从未注册，绑定前先幂等注册，
+                        // 否则服务端 bind 会因「设备不存在」失败。
+                        when (oauth.register(app.identity.deviceId, app.identity.secret, app.identity.deviceName)) {
+                            RegisterResult.OK -> app.settings.registered = true
+                            RegisterResult.DISABLED -> {
+                                oauthUi.value = OAuthUi.Failed("设备注册被服务器拒绝：请在服务端设置 ALLOW_REGISTRATION=true 并重启，再重新绑定")
+                                oauthProcessing = false
+                                return@launch
+                            }
+                            RegisterResult.FAILED -> {
+                                oauthUi.value = OAuthUi.Failed("设备注册失败，请检查网络与服务器地址后重试")
+                                oauthProcessing = false
+                                return@launch
+                            }
+                        }
+                        when (val result = oauth.bind(token, app.identity.deviceId, app.identity.secret)) {
+                            is BindResult.Ok -> {
+                                app.settings.boundUsername = result.username
+                                oauthUi.value = OAuthUi.Success(result.username)
+                            }
+                            is BindResult.Err -> oauthUi.value = OAuthUi.Failed(result.reason)
                         }
                         oauthProcessing = false
                     }

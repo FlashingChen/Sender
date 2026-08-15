@@ -39,12 +39,12 @@ class SyncEngineTest {
 
     private class FakeApi : Api {
         var registerCalls = 0
-        var registerResult = true
+        var registerResult = RegisterResult.OK
         var uploadCalls = 0
         var uploadResult = UploadResult.SUCCESS
         val uploadBodies = mutableListOf<String>()
 
-        override suspend fun register(deviceId: String, secret: String, deviceName: String): Boolean {
+        override suspend fun register(deviceId: String, secret: String, deviceName: String): RegisterResult {
             registerCalls++
             return registerResult
         }
@@ -89,7 +89,7 @@ class SyncEngineTest {
     @Test
     fun registerFailure_blocksUpload_keepsSyncedFalse() = runBlocking {
         repo.add("m1")
-        api.registerResult = false
+        api.registerResult = RegisterResult.FAILED
         val result = engine().sync()
         assertEquals(SyncResult.REGISTER_FAILED, result)
         assertEquals(0, api.uploadCalls)

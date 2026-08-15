@@ -59,12 +59,21 @@ class ApiClientTest {
     fun register_hitsContractPathWithSecretHeader() = runBlocking {
         val factory = FakeFactory()
         val ok = client(factory).register(deviceId, secret, "Pixel 8")
-        assertTrue(ok)
+        assertEquals(RegisterResult.OK, ok)
         val conn = factory.connections.single()
         assertEquals("POST", conn.requestMethod)
         assertEquals("http://10.0.2.2:8080/api/v1/devices/register", conn.createdUrls.single())
         assertEquals(secret, conn.header("X-Device-Secret"))
         assertEquals("""{"device_id":"$deviceId","name":"Pixel 8"}""", conn.output.toString(Charsets.UTF_8.name()))
+    }
+
+    /** Register maps 403 to DISABLED (server closed registration) and other failures to FAILED. */
+    @Test
+    fun register_distinguishesDisabled() = runBlocking {
+        val disabled = FakeFactory().also { it.status = 403 }
+        assertEquals(RegisterResult.DISABLED, client(disabled).register(deviceId, secret, "Pixel 8"))
+        val serverError = FakeFactory().also { it.status = 500 }
+        assertEquals(RegisterResult.FAILED, client(serverError).register(deviceId, secret, "Pixel 8"))
     }
 
     /** Contract: POST /api/v1/devices/{device_id}/messages with Authorization: Bearer <secret>. */
@@ -98,6 +107,6 @@ class ApiClientTest {
         val factory = FakeFactory()
         factory.failWith = java.io.IOException("connection refused")
         assertEquals(UploadResult.FAILED, client(factory).upload(deviceId, secret, "{}"))
-        assertFalse(client(factory).register(deviceId, secret, "Pixel 8"))
+        assertEquals(RegisterResult.FAILED, client(factory).register(deviceId, secret, "Pixel 8"))
     }
 }

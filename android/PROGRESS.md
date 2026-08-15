@@ -1,5 +1,15 @@
 # PROGRESS
 
+## Phase 3 修复（2026-08-12）：第二台手机绑定失败
+
+- 现象：新手机「登录并绑定账号」提示「绑定失败，请重试」，设置页注册状态为「未注册」。
+- 根因：设备注册只发生在 SyncEngine 首次上报（`!isRegistered() → register`）；新手机尚未上报（或正式服务器 `ALLOW_REGISTRATION=false` 拒绝注册）时，服务端 `BindDevice` 查不到设备返回 400 "device not found"，App 把一切失败都吞成「绑定失败，请重试」。
+- 修复：① 绑定流程改为「换 token → **先幂等注册设备** → 再 bind」（与 OAuth 同一锁定服务器）；② 注册失败细分 `RegisterResult{OK,DISABLED,FAILED}`（403=服务器关闭注册，提示开启 `ALLOW_REGISTRATION=true`）；③ `OAuth.bind` 返回 `BindResult.Ok/Err`，按 HTTP 状态码映射可展示原因（401 授权失效 / 409 已被绑定 / 429 限流 / 400 device not found 等），不再笼统「请重试」。
+- 涉及：Api.kt、ApiClient.kt、SyncEngine.kt、OAuth.kt、MainActivity.kt、SettingsScreen.kt（文案）+ 三个测试文件。
+- 验证：`assembleDebug` + `testDebugUnitTest` 51 绿 0 skip（原 40 + 新增 11）。
+
+# PROGRESS（原文）
+
 ## 理解的目标/顺序/最大风险 (2026-08-03)
 
 - 目标：安卓通知采集器 `dev.sender.app`：NLS 捕获通知 → 开关过滤 → Room 去重入库 → 按 App 查看/开关 → WorkManager 上报自托管服务端（注册成功前不上传，2xx 才标 synced=1，单批 ≤500）。

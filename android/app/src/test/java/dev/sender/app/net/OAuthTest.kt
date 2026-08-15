@@ -152,13 +152,13 @@ class OAuthTest {
         assertNull(oauth(factory).exchangeToken("CODE", "VERIFIER"))
     }
 
-    /** Bind: Bearer header + device body, returns parsed username. */
+    /** Bind: Bearer header + device body, returns username. */
     @Test
     fun bind_sendsBearerAndDeviceBody_returnsUsername() = runBlocking {
         val factory = FakeFactory()
         factory.responseBody = """{"ok":true,"username":"alice"}"""
-        val username = oauth(factory).bind("tok123", "dev-1", "sec-1")
-        assertEquals("alice", username)
+        val result = oauth(factory).bind("tok123", "dev-1", "sec-1")
+        assertEquals(BindResult.Ok("alice"), result)
         val conn = factory.connections.single()
         assertEquals("POST", conn.requestMethod)
         assertEquals("http://10.0.2.2:8080/api/v1/devices/bind", conn.createdUrls.single())
@@ -166,11 +166,74 @@ class OAuthTest {
         assertEquals("""{"device_id":"dev-1","secret":"sec-1"}""", conn.output.toString(Charsets.UTF_8.name()))
     }
 
-    /** Bind failure (server says not ok) -> null. */
+    /** Bind 400 device not found -> displayable reason mentioning registration. */
     @Test
-    fun bind_non2xx_returnsNull() = runBlocking {
+    fun bind_deviceNotFound_reportsRegistration() = runBlocking {
+        val factory = FakeFactory()
+        factory.status = 400
+        factory.responseBody = """{"error":"device not found"}"""
+        val result = oauth(factory).bind("tok123", "dev-1", "sec-1")
+        assertTrue(result is BindResult.Err)
+        assertTrue((result as BindResult.Err).reason.contains("未注册"))
+    }
+
+    /** Bind 401 -> token invalid, re-bind needed. */
+    @Test
+    fun bind_401_reportsExpiredAuthorization() = runBlocking {
+        val factory = FakeFactory()
+        factory.status = 401
+        val result = oauth(factory).bind("tok123", "dev-1", "sec-1")
+        assertTrue(result is BindResult.Err)
+        assertTrue((result as BindResult.Err).reason.contains("授权已失效"))
+    }
+
+    /** Bind 409 -> already owned by another account. */
+    @Test
+    fun bind_409_reportsAlreadyBound() = runBlocking {
+        val factory = FakeFactory()
+        factory.status = 409
+        val result = oauth(factory).bind("tok123", "dev-1", "sec-1")
+        assertTrue(result is BindResult.Err)
+        assertTrue((result as BindResult.Err).reason.contains("已被其他账号绑定"))
+    }
+
+    /** Bind 429 -> rate limited, retry later. */
+    @Test
+    fun bind_429_reportsRateLimit() = runBlocking {
+        val factory = FakeFactory()
+        factory.status = 429
+        val result = oauth(factory).bind("tok123", "dev-1", "sec-1")
+        assertTrue(result is BindResult.Err)
+        assertTrue((result as BindResult.Err).reason.contains("过于频繁"))
+    }
+
+    /** Register: X-Device-Secret header + device body, 2xx -> OK. */
+    @Test
+    fun register_hitsContractPathWithSecretHeader() = runBlocking {
+        val factory = FakeFactory()
+        factory.responseBody = """{"ok":true}"""
+        assertEquals(RegisterResult.OK, oauth(factory).register("dev-1", "sec-1", "Pixel 8"))
+        val conn = factory.connections.single()
+        assertEquals("POST", conn.requestMethod)
+        assertEquals("http://10.0.2.2:8080/api/v1/devices/register", conn.createdUrls.single())
+        assertEquals("sec-1", conn.header("X-Device-Secret"))
+        assertEquals("""{"device_id":"dev-1","name":"Pixel 8"}""", conn.output.toString(Charsets.UTF_8.name()))
+    }
+
+    /** Register 403 -> registration disabled server-side. */
+    @Test
+    fun register_403_isDisabled() = runBlocking {
         val factory = FakeFactory()
         factory.status = 403
-        assertNull(oauth(factory).bind("tok123", "dev-1", "sec-1"))
+        factory.responseBody = """{"error":"registration disabled"}"""
+        assertEquals(RegisterResult.DISABLED, oauth(factory).register("dev-1", "sec-1", "Pixel 8"))
+    }
+
+    /** Register network failure -> FAILED. */
+    @Test
+    fun register_networkError_isFailed() = runBlocking {
+        val factory = FakeFactory()
+        factory.status = -1
+        assertEquals(RegisterResult.FAILED, oauth(factory).register("dev-1", "sec-1", "Pixel 8"))
     }
 }

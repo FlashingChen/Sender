@@ -47,7 +47,7 @@ class SyncEngine(
 
     private suspend fun syncUnlocked(): SyncResult {
         if (!isRegistered()) {
-            if (!api.register(deviceId, secret, deviceName)) return SyncResult.REGISTER_FAILED
+            if (api.register(deviceId, secret, deviceName) != RegisterResult.OK) return SyncResult.REGISTER_FAILED
             markRegistered()
         }
         var uploadedAny = false

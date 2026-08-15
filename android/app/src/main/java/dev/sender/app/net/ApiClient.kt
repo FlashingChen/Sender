@@ -16,12 +16,16 @@ class ApiClient(
     },
 ) : Api {
 
-    override suspend fun register(deviceId: String, secret: String, deviceName: String): Boolean =
+    override suspend fun register(deviceId: String, secret: String, deviceName: String): RegisterResult =
         withContext(Dispatchers.IO) {
             val body = """{"device_id":${PayloadBuilder.jsonString(deviceId)},"name":${PayloadBuilder.jsonString(deviceName)}}"""
-            request(base(), "POST", "/api/v1/devices/register", body) { conn ->
+            when (val code = request(base(), "POST", "/api/v1/devices/register", body) { conn ->
                 conn.setRequestProperty("X-Device-Secret", secret)
-            } in 200..299
+            }) {
+                in 200..299 -> RegisterResult.OK
+                403 -> RegisterResult.DISABLED
+                else -> RegisterResult.FAILED
+            }
         }
 
     override suspend fun upload(deviceId: String, secret: String, body: String): UploadResult =
